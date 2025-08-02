@@ -188,11 +188,12 @@ if st.sidebar.button("🚪 Logout"):
 
 # --- Role-Based Menus ---
 menus = {
-    "Admin": [...],
+    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
     "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Supplier": ["Shipments"]
 }
+
 
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
