@@ -202,11 +202,23 @@ if menu == "Shipments":
     st.header("🚚 Supplier Shipments")
     if role == "Supplier":
         st.header("📦 New Shipment")
+        st.markdown("""
+        Please complete the shipment form below.<br>
+        <b>Instructions:</b>  
+        - Enter a valid Tracking Number and Carrier Name.  
+        - Select the correct Destination Hub.  
+        - List all SKUs and quantities in this format: <br>
+        <code>Black Solid x 10, Rainbow Stripes x 5</code>
+        """, unsafe_allow_html=True)
         with st.form("shipment_form"):
             tracking = st.text_input("Tracking Number", key="track")
-            carrier = st.text_input("Carrier Name", key="carrier")
+            carrier = st.text_input("Shipping Carrier", key="carrier")
             hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3"], key="hub_dest")
-            skus = st.text_area("SKUs Shipped (comma-separated)", help="Example: Black Solid, Rainbow Stripes", key="skus_list")
+            skus = st.text_area(
+                "SKUs and Quantities Shipped",
+                placeholder="Black Solid x 10, Rainbow Stripes x 5",
+                help="Enter each SKU and quantity, separated by commas."
+            )
             date = st.date_input("Shipping Date", value=datetime.today(), key="ship_date")
             submit = st.form_submit_button("Submit Shipment")
         if submit:
@@ -221,32 +233,6 @@ if menu == "Shipments":
                 st.rerun()
             else:
                 st.error("Please fill out all required fields.")
-    else:
-        rows = query("SELECT * FROM shipments ORDER BY id DESC")
-        df = pd.DataFrame(rows, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
-        st.dataframe(df, use_container_width=True)
-        pending = df[df["Status"] == "Pending"]
-        if not pending.empty:
-            st.subheader("📥 Mark Shipment as Received")
-            to_confirm = st.selectbox("Select Pending Shipment", pending["ID"].tolist())
-            if st.button("Mark as Received"):
-                record = df[df["ID"] == to_confirm].iloc[0]
-                sku_list = [s.strip() for s in record["SKUs"].split(",") if s.strip()]
-                for sku in sku_list:
-                    current = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, record["Hub"]))
-                    curr_qty = current[0][0] if current else 0
-                    new_qty = curr_qty + 1
-                    query(
-                        "INSERT INTO inventory (sku, hub, quantity) VALUES (?, ?, ?) ON CONFLICT(sku, hub) DO UPDATE SET quantity=?",
-                        (sku, record["Hub"], new_qty, new_qty), fetch=False)
-                    query(
-                        "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (datetime.now().isoformat(), username, sku, record["Hub"], "IN", 1, f"Received via shipment {record['ID']}"),
-                        fetch=False
-                    )
-                query("UPDATE shipments SET status='Received' WHERE id=?", (to_confirm,), fetch=False)
-                st.success("Inventory updated from received shipment!")
-                st.rerun()
 
 # --- Messages ---
 if menu == "Messages":
