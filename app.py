@@ -1,4 +1,4 @@
-# KISS Inventory Management App (CLEAN FINAL)
+# KISS Inventory Management App (Super Clean Final)
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -10,7 +10,6 @@ import io
 # --- Configurable DB Path ---
 DB = Path(__file__).parent / "ttt_inventory.db"
 
-# --- DB Utility ---
 def query(sql, params=(), fetch=True):
     with sqlite3.connect(DB) as conn:
         cur = conn.cursor()
@@ -18,7 +17,6 @@ def query(sql, params=(), fetch=True):
         conn.commit()
         return cur.fetchall() if fetch else None
 
-# --- Create Tables ---
 def create_tables():
     query("""CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
@@ -63,12 +61,10 @@ def create_tables():
         hub TEXT,
         confirmed_at TEXT)""")
 
-# --- Seed SKUs to All Hubs and Retail ---
 def seed_all_skus():
     query("DELETE FROM sku_info", fetch=False)
     query("DELETE FROM inventory", fetch=False)
     query("DELETE FROM logs", fetch=False)
-
     hub_assignments = {
         "Hub 1": ["All American Stripes", "Carolina Blue and White Stripes", "Navy and Silver Stripes",
                   "Black and Hot Pink Stripes", "Bubble Gum and White Stripes", "White and Ice Blue Stripes",
@@ -85,7 +81,6 @@ def seed_all_skus():
                   "Smoke Grey Solid", "Cherry Solid", "Brown Solid", "Wheat and White Stripes",
                   "Black Solid", "Black and White Stripes"]
     }
-
     retail_skus = [
         "Black Solid", "Bubblegum", "Tan Solid", "Hot Pink Solid", "Brown Solid", "Dark Cherry Solid",
         "Winter White Solid", "Coral Orange", "Navy Solid", "Electric Blue Solid", "Celtic Green",
@@ -110,11 +105,9 @@ def seed_all_skus():
         "Black w/Red stripes (THN)", "Black w/Pink stripes (THN)", "Hot Pink w/White stripes (THN)",
         "Black Solid (SHORT)", "White Solid (SHORT)", "Black and White Stripes (SHORT)"
     ]
-
     all_skus = set(retail_skus)
     for hub_list in hub_assignments.values():
         all_skus.update(hub_list)
-
     for sku in sorted(all_skus):
         assigned = [hub for hub, skus in hub_assignments.items() if sku in skus]
         if sku in retail_skus:
@@ -124,7 +117,6 @@ def seed_all_skus():
         for h in assigned:
             query("INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)", (sku, h, 0), fetch=False)
 
-# --- Seed Users ---
 def seed_users():
     users = [
         ("kevin", "Admin", "HQ", "adminpass"),
@@ -138,18 +130,14 @@ def seed_users():
         pw = hashlib.sha256(p.encode()).hexdigest()
         query("INSERT OR IGNORE INTO users (username, password, role, hub) VALUES (?, ?, ?, ?)", (u, pw, r, h))
 
-# --- Setup DB ---
 def setup_db():
     create_tables()
     seed_all_skus()
     seed_users()
 
-# Only run this once at the top level
 if not Path(DB).exists():
     setup_db()
 
-
-# --- Auth ---
 def login(username, password):
     hashed = hashlib.sha256(password.encode()).hexdigest()
     u = query("SELECT username, role, hub FROM users WHERE username=? AND password=?", (username, hashed))
@@ -164,7 +152,6 @@ def count_unread(username):
             unread += 1
     return unread
 
-# --- Session & Sidebar ---
 if 'user' not in st.session_state:
     st.sidebar.title("🔐 Login")
     u = st.sidebar.text_input("Username")
@@ -186,39 +173,46 @@ if st.sidebar.button("🚪 Logout"):
     del st.session_state.user
     st.rerun()
 
-# --- Role-Based Menus ---
+with st.sidebar.expander("❓ Help / FAQ", expanded=False):
+    st.markdown("""
+    **How to Use:**
+    - **Bulk Update:** Enter numbers for SKUs. Positive for IN, negative for OUT.
+    - **Shipments:** Enter tracking, carrier, and `SKU x QTY`.
+    - **Messages:** Ask HQ anything.
+    - **Low Stock:** Any SKU <10 shows 🟥.
+    *Questions?* Email Kevin.
+    """)
+
+# Quick dashboard summary
+if role in ("Hub Manager", "Retail"):
+    low_count = query("SELECT COUNT(*) FROM inventory WHERE quantity < 10 AND hub=?", (hub,))
+    low_count = low_count[0][0] if low_count else 0
+    pending_shipments = query("SELECT COUNT(*) FROM shipments WHERE status='Pending' AND hub=?", (hub,))
+    pending_shipments = pending_shipments[0][0] if pending_shipments else 0
+    st.sidebar.markdown(f"---\n**SKUs Low:** 🟥 {low_count}  \n**Pending Shipments:** {pending_shipments}\n---")
+
 menus = {
     "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
     "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Supplier": ["Shipments"]
 }
-
-
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
 # --- Shipments ---
 if menu == "Shipments":
     st.header("🚚 Supplier Shipments")
     if role == "Supplier":
-        st.header("📦 New Shipment")
         st.markdown("""
-        Please complete the shipment form below.<br>
-        <b>Instructions:</b>  
-        - Enter a valid Tracking Number and Carrier Name.  
-        - Select the correct Destination Hub.  
-        - List all SKUs and quantities in this format: <br>
-        <code>Black Solid x 10, Rainbow Stripes x 5</code>
-        """, unsafe_allow_html=True)
+        **Instructions:**  
+        - Tracking # and Carrier required  
+        - SKUs as `Name x QTY, Name x QTY`
+        """)
         with st.form("shipment_form"):
             tracking = st.text_input("Tracking Number", key="track")
             carrier = st.text_input("Shipping Carrier", key="carrier")
             hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3"], key="hub_dest")
-            skus = st.text_area(
-                "SKUs and Quantities Shipped",
-                placeholder="Black Solid x 10, Rainbow Stripes x 5",
-                help="Enter each SKU and quantity, separated by commas."
-            )
+            skus = st.text_area("SKUs and Quantities", placeholder="Black Solid x 10, Rainbow Stripes x 5")
             date = st.date_input("Shipping Date", value=datetime.today(), key="ship_date")
             submit = st.form_submit_button("Submit Shipment")
         if submit:
@@ -226,13 +220,42 @@ if menu == "Shipments":
                 query("""
                     INSERT INTO shipments (supplier, tracking, carrier, hub, skus, date, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (username, tracking.strip(), carrier.strip(), hub_dest, skus.strip(), str(date), "Pending"),
-                    fetch=False
-                )
-                st.success("Shipment submitted successfully!")
+                    (username, tracking.strip(), carrier.strip(), hub_dest, skus.strip(), str(date), "Pending"), fetch=False)
+                st.success("Shipment submitted!")
                 st.rerun()
             else:
                 st.error("Please fill out all required fields.")
+    else:
+        rows = query("SELECT * FROM shipments ORDER BY id DESC")
+        df = pd.DataFrame(rows, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
+        st.dataframe(df, use_container_width=True)
+        pending = df[df["Status"] == "Pending"]
+        if not pending.empty:
+            st.subheader("📥 Mark Shipment as Received")
+            to_confirm = st.selectbox("Select Pending Shipment", pending["ID"].tolist())
+            if st.button("Mark as Received"):
+                record = df[df["ID"] == to_confirm].iloc[0]
+                sku_list = [s.strip() for s in record["SKUs"].split(",") if s.strip()]
+                for sku in sku_list:
+                    if ' x ' in sku:
+                        name, qty = sku.rsplit(' x ', 1)
+                        try:
+                            qty = int(qty)
+                        except:
+                            qty = 1
+                    else:
+                        name = sku
+                        qty = 1
+                    current = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (name, record["Hub"]))
+                    curr_qty = current[0][0] if current else 0
+                    new_qty = curr_qty + qty
+                    query("INSERT INTO inventory (sku, hub, quantity) VALUES (?, ?, ?) ON CONFLICT(sku, hub) DO UPDATE SET quantity=?",
+                          (name, record["Hub"], new_qty, new_qty), fetch=False)
+                    query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          (datetime.now().isoformat(), username, name, record["Hub"], "IN", qty, f"Shipment {record['ID']}"), fetch=False)
+                query("UPDATE shipments SET status='Received' WHERE id=?", (to_confirm,), fetch=False)
+                st.success("Inventory updated from shipment!")
+                st.rerun()
 
 # --- Messages ---
 if menu == "Messages":
@@ -241,7 +264,6 @@ if menu == "Messages":
         users = [u[0] for u in query("SELECT username FROM users WHERE username != ?", (username,))]
     else:
         users = [u[0] for u in query("SELECT username FROM users WHERE role='Admin'")]
-
     st.subheader("Send New Message")
     recipient = st.selectbox("To", users)
     thread = st.text_input("Thread Subject")
@@ -251,7 +273,6 @@ if menu == "Messages":
               (username, recipient, msg, thread or f"{username}-{recipient}", datetime.now().isoformat()), fetch=False)
         st.success("✅ Message sent!")
         st.rerun()
-
     st.markdown("---")
     st.subheader("📨 Your Threads")
     threads = query("SELECT DISTINCT thread FROM messages WHERE sender=? OR receiver=?", (username, username))
@@ -298,12 +319,10 @@ if menu == "Count":
     df = pd.DataFrame(data, columns=["SKU", "Hub", "Qty"])
     df['Status'] = df['Qty'].apply(lambda x: "🟥 Low" if x < 10 else "✅ OK")
     st.dataframe(df, use_container_width=True)
-
     if role != "Admin" and st.button("✅ Confirm Inventory Count"):
         query("INSERT INTO count_confirmations VALUES (?, ?, ?)", (username, hub, datetime.now().isoformat()), fetch=False)
         st.success("Count confirmed.")
         st.rerun()
-
     if role == "Admin":
         confirms = query("SELECT * FROM count_confirmations ORDER BY confirmed_at DESC")
         df_confirm = pd.DataFrame(confirms, columns=["User", "Hub", "Time"])
@@ -336,10 +355,6 @@ if menu == "Update Stock":
     action = st.radio("Action", ["IN", "OUT"])
     qty = st.number_input("Quantity", min_value=1, step=1)
     comment = st.text_input("Optional Comment")
-
-    if 'debug_rows' not in st.session_state:
-        st.session_state['debug_rows'] = []
-
     if st.button("Submit Update"):
         record = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, hub))
         current = record[0][0] if record else 0
@@ -347,87 +362,57 @@ if menu == "Update Stock":
             st.warning("\u274C Not enough stock to remove that amount!")
         else:
             new_qty = current + qty if action == "IN" else current - qty
-            query(
-                """INSERT INTO inventory (sku, hub, quantity)
-                   VALUES (?, ?, ?)
-                   ON CONFLICT(sku, hub) DO UPDATE SET quantity=excluded.quantity""",
-                (sku, hub, new_qty), fetch=False
+            query("""INSERT INTO inventory (sku, hub, quantity)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(sku, hub) DO UPDATE SET quantity=excluded.quantity""",
+                  (sku, hub, new_qty), fetch=False)
+            query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (datetime.now().isoformat(), username, sku, hub, action, qty, comment), fetch=False)
+            st.success(
+                f"✅ Inventory updated!  \n**SKU:** {sku}  \n**Hub:** {hub}  \n**Action:** {action}  \n**Qty:** {qty}  \n**New Qty:** {new_qty}"
             )
-            query(
-                "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (datetime.now().isoformat(), username, sku, hub, action, qty, comment), fetch=False
-            )
-            # Save and display debug info for this session
-            st.session_state['debug_rows'] = query("SELECT sku, hub, quantity FROM inventory WHERE hub=?", (hub,))
-            st.success(f"Inventory successfully updated! New Qty: {new_qty}")
             st.rerun()
 
-    # Always display debug info (will persist until next submit)
-    #st.write("DEBUG: Current inventory for this hub:", st.session_state['debug_rows'])
-    #st.write("DEBUG: SELECTED SKU:", sku)
-
-#-- BULK UPDATE --
+# --- Bulk Update ---
 if menu == "Bulk Update":
     st.header("📝 Bulk Inventory Update")
     rows = query("SELECT sku, quantity FROM inventory WHERE hub=?", (hub,))
     df = pd.DataFrame(rows, columns=["SKU", "Current Qty"])
-
     with st.form("bulk_update_form"):
-        st.info("Enter IN or OUT amounts for any SKUs you want to update. Leave blank to skip. Comments optional.")
+        st.info("Enter a positive number for IN, negative for OUT. Leave blank to skip. Comments optional.")
         update_data = []
         for idx, row in df.iterrows():
-            with st.container():
-                st.markdown(f"**{row['SKU']}**  &nbsp; *(Current: {row['Current Qty']})*")
-                c1, c2, c3 = st.columns([1,1,2.5])
-                with c1:
-                    in_qty = st.text_input("", value="", key=f"in_{row['SKU']}", placeholder="IN")
-                with c2:
-                    out_qty = st.text_input("", value="", key=f"out_{row['SKU']}", placeholder="OUT")
-                with c3:
-                    comment = st.text_input("", value="", key=f"comm_{row['SKU']}", placeholder="Optional comment")
-                update_data.append((row["SKU"], in_qty, out_qty, comment))
-                st.markdown("<hr style='margin:0.4em 0; border-top:1px solid #23282e;'>", unsafe_allow_html=True)
+            with st.expander(f"{row['SKU']}  (Current: {row['Current Qty']})", expanded=False):
+                adj = st.text_input("Adjust Quantity (+IN / -OUT)", value="", key=f"adj_{row['SKU']}")
+                comment = st.text_input("Comment", value="", key=f"comm_{row['SKU']}", placeholder="Optional")
+                update_data.append((row["SKU"], adj, comment))
         submitted = st.form_submit_button("Apply All Updates")
-
     if submitted:
         errors = []
-        for sku, in_qty, out_qty, comment in update_data:
-            # Convert blank/non-number to 0
-            try: in_qty = int(in_qty.strip()) if in_qty.strip() else 0
-            except: in_qty = 0
-            try: out_qty = int(out_qty.strip()) if out_qty.strip() else 0
-            except: out_qty = 0
-
-            if in_qty > 0:
-                record = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, hub))
-                current = record[0][0] if record else 0
-                new_qty = current + in_qty
-                query("""INSERT INTO inventory (sku, hub, quantity)
-                         VALUES (?, ?, ?)
-                         ON CONFLICT(sku, hub) DO UPDATE SET quantity=excluded.quantity""",
-                      (sku, hub, new_qty), fetch=False)
-                query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (datetime.now().isoformat(), username, sku, hub, "IN", in_qty, comment), fetch=False)
-
-            if out_qty > 0:
-                record = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, hub))
-                current = record[0][0] if record else 0
-                if out_qty > current:
-                    errors.append(f"❌ Not enough '{sku}' for OUT ({current} available, tried {out_qty})")
-                    continue
-                new_qty = current - out_qty
-                query("""INSERT INTO inventory (sku, hub, quantity)
-                         VALUES (?, ?, ?)
-                         ON CONFLICT(sku, hub) DO UPDATE SET quantity=excluded.quantity""",
-                      (sku, hub, new_qty), fetch=False)
-                query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (datetime.now().isoformat(), username, sku, hub, "OUT", out_qty, comment), fetch=False)
+        results = []
+        for sku, adj, comment in update_data:
+            try: n = int(adj.strip()) if adj.strip() else 0
+            except: n = 0
+            if n == 0: continue
+            record = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, hub))
+            current = record[0][0] if record else 0
+            new_qty = current + n
+            if new_qty < 0:
+                errors.append(f"❌ Not enough '{sku}' (Now: {current}, Tried: {n})")
+                continue
+            action = "IN" if n > 0 else "OUT"
+            query("""INSERT INTO inventory (sku, hub, quantity)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(sku, hub) DO UPDATE SET quantity=excluded.quantity""",
+                  (sku, hub, new_qty), fetch=False)
+            query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (datetime.now().isoformat(), username, sku, hub, action, abs(n), comment), fetch=False)
+            results.append(f"{sku}: {action} {abs(n)} (Now: {new_qty})")
         if errors:
             st.warning("Some updates failed:\n" + "\n".join(errors))
-        else:
-            st.success("Bulk update complete!")
+        if results:
+            st.success("✅ Bulk update complete!\n\n" + "\n".join(results))
         st.rerun()
-
 
 # --- Create SKU ---
 if menu == "Create SKU":
@@ -491,8 +476,11 @@ if menu == "User Access":
         users = query("SELECT username FROM users WHERE username != ?", (username,))
         user_list = [u[0] for u in users]
         selected_user = st.selectbox("Select User to Remove", user_list, key="remove_user")
-        confirm = st.form_submit_button("Confirm Removal")
-        if confirm:
-            query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False)
-            st.success(f"✅ User '{selected_user}' removed.")
-            st.rerun()
+        if st.form_submit_button("Request Removal"):
+            st.session_state['confirm_remove_user'] = selected_user
+        if st.session_state.get('confirm_remove_user') == selected_user:
+            if st.button(f"Really remove {selected_user}?"):
+                query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False)
+                st.success(f"✅ User '{selected_user}' removed.")
+                st.session_state.pop('confirm_remove_user')
+                st.rerun()
