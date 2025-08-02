@@ -1,4 +1,4 @@
-# KISS Inventory Management App (Super Clean Final)
+# KISS Inventory Management App (Super Clean Final w/ Sleek Supplier Bulk Entry)
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -82,6 +82,7 @@ def seed_all_skus():
                   "Black Solid", "Black and White Stripes"]
     }
     retail_skus = [
+        # Add your full retail_skus list here (as above) ...
         "Black Solid", "Bubblegum", "Tan Solid", "Hot Pink Solid", "Brown Solid", "Dark Cherry Solid",
         "Winter White Solid", "Coral Orange", "Navy Solid", "Electric Blue Solid", "Celtic Green",
         "Cherry Solid", "Smoke Grey Solid", "Chartreuse Green", "Lovely Lilac", "Carolina Blue Solid",
@@ -199,32 +200,61 @@ menus = {
 }
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
-# --- Shipments ---
+# --- Sleek Supplier Shipments: Bulk Table UI ---
 if menu == "Shipments":
     st.header("🚚 Supplier Shipments")
     if role == "Supplier":
-        st.markdown("""
-        **Instructions:**  
-        - Tracking # and Carrier required  
-        - SKUs as `Name x QTY, Name x QTY`
-        """)
-        with st.form("shipment_form"):
-            tracking = st.text_input("Tracking Number", key="track")
-            carrier = st.text_input("Shipping Carrier", key="carrier")
-            hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3"], key="hub_dest")
-            skus = st.text_area("SKUs and Quantities", placeholder="Black Solid x 10, Rainbow Stripes x 5")
-            date = st.date_input("Shipping Date", value=datetime.today(), key="ship_date")
-            submit = st.form_submit_button("Submit Shipment")
-        if submit:
-            if tracking and carrier and skus:
+        st.markdown("**Add one or more SKUs for this shipment.**")
+        tracking = st.text_input("Tracking Number")
+        carrier = st.text_input("Carrier Name")
+        hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3", "Retail"])
+        date = st.date_input("Shipping Date", value=datetime.today())
+        # --- Dynamic Multi-SKU Entry ---
+        if "supplier_skus" not in st.session_state:
+            st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
+        supplier_skus = st.session_state["supplier_skus"]
+        all_sku_options = [s[0] for s in query("SELECT sku FROM sku_info")]
+
+        for i, entry in enumerate(supplier_skus):
+            cols = st.columns([4,2,1])
+            with cols[0]:
+                entry["sku"] = st.selectbox(f"SKU {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
+            with cols[1]:
+                entry["qty"] = st.number_input(f"Qty {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
+            with cols[2]:
+                if st.button("Remove", key=f"rmv_sku_{i}"):
+                    supplier_skus.pop(i)
+                    st.experimental_rerun()
+        if st.button("Add Another SKU"):
+            supplier_skus.append({"sku": "", "qty": 1})
+            st.experimental_rerun()
+
+        st.markdown("---")
+        with st.expander("➕ Create New SKU"):
+            new_sku = st.text_input("New SKU Name", key="supplier_new_sku")
+            if st.button("Add SKU", key="supplier_add_sku"):
+                if new_sku.strip():
+                    query("INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
+                        (new_sku.strip(), new_sku.strip(), "Hub 1,Hub 2,Hub 3,Retail"), fetch=False)
+                    st.success(f"SKU '{new_sku.strip()}' added.")
+                    st.experimental_rerun()
+                else:
+                    st.warning("Enter a SKU name.")
+
+        submitted = st.button("Submit Shipment")
+        if submitted:
+            if tracking and carrier and all(e["sku"] for e in supplier_skus):
+                skus_str = ", ".join([f"{e['sku']} x {e['qty']}" for e in supplier_skus if e["sku"]])
                 query("""
                     INSERT INTO shipments (supplier, tracking, carrier, hub, skus, date, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (username, tracking.strip(), carrier.strip(), hub_dest, skus.strip(), str(date), "Pending"), fetch=False)
-                st.success("Shipment submitted!")
-                st.rerun()
+                    (username, tracking.strip(), carrier.strip(), hub_dest, skus_str, str(date), "Pending"), fetch=False)
+                st.success("Shipment submitted successfully!")
+                st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
+                st.experimental_rerun()
             else:
-                st.error("Please fill out all required fields.")
+                st.error("Please fill out all required fields and SKUs.")
+
     else:
         rows = query("SELECT * FROM shipments ORDER BY id DESC")
         df = pd.DataFrame(rows, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
@@ -256,6 +286,7 @@ if menu == "Shipments":
                 query("UPDATE shipments SET status='Received' WHERE id=?", (to_confirm,), fetch=False)
                 st.success("Inventory updated from shipment!")
                 st.rerun()
+
 
 # --- Messages ---
 if menu == "Messages":
