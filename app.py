@@ -113,7 +113,7 @@ def create_tables():
         confirmed_at TEXT)""")
 
 def seed_all_skus():
-    # Note: Not deleting existing data here to preserve inventory/logs/users
+    # No deletes here, to preserve inventory, logs, users
     hub_assignments = {
         "Hub 1": ["All American Stripes", "Carolina Blue and White Stripes", "Navy and Silver Stripes",
                   "Black and Hot Pink Stripes", "Bubble Gum and White Stripes", "White and Ice Blue Stripes",
@@ -131,6 +131,7 @@ def seed_all_skus():
                   "Black Solid", "Black and White Stripes"]
     }
     retail_skus = [
+        # (Include your retail SKUs list here as before)
         "Black Solid", "Bubblegum", "Tan Solid", "Hot Pink Solid", "Brown Solid", "Dark Cherry Solid",
         "Winter White Solid", "Coral Orange", "Navy Solid", "Electric Blue Solid", "Celtic Green",
         "Cherry Solid", "Smoke Grey Solid", "Chartreuse Green", "Lovely Lilac", "Carolina Blue Solid",
@@ -181,7 +182,6 @@ def seed_users():
 
 def setup_db():
     create_tables()
-    # Only seed SKUs if none exist
     existing_skus = query("SELECT sku FROM sku_info LIMIT 1")
     if not existing_skus:
         seed_all_skus()
@@ -190,7 +190,6 @@ def setup_db():
 if not Path(DB).exists():
     setup_db()
 else:
-    # Ensure tables and users exist but don't delete data
     create_tables()
     seed_users()
 
@@ -231,20 +230,21 @@ if st.sidebar.button("🚪 Logout", key="logout_btn"):
 
 menus = {
     "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
-    "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
+    "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Shipments"],
     "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Supplier": ["Shipments"]
 }
+
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
 # --- Shipments ---
 if menu == "Shipments":
-    st.header("🚚 Supplier Shipments")
     if role == "Supplier":
-        tracking = st.text_input("Tracking Number")
-        carrier = st.text_input("Carrier Name")
-        hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3", "Retail"])
-        date = st.date_input("Shipping Date", value=datetime.today())
+        st.header(T("supplier_shipments"))
+        tracking = st.text_input(T("tracking_number"))
+        carrier = st.text_input(T("carrier"))
+        hub_dest = st.selectbox(T("destination_hub"), ["Hub 1", "Hub 2", "Hub 3", "Retail"])
+        date = st.date_input(T("shipping_date"), value=datetime.today())
         if "supplier_skus" not in st.session_state:
             st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
         supplier_skus = st.session_state["supplier_skus"]
@@ -252,20 +252,20 @@ if menu == "Shipments":
         for i, entry in enumerate(supplier_skus):
             cols = st.columns([4, 2, 1])
             with cols[0]:
-                entry["sku"] = st.selectbox(f"SKU {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
+                entry["sku"] = st.selectbox(f"{T('sku')} {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
             with cols[1]:
-                entry["qty"] = st.number_input(f"Qty {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
+                entry["qty"] = st.number_input(f"{T('qty')} {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
             with cols[2]:
-                if st.button("Remove", key=f"rmv_sku_{i}"):
+                if st.button(T("remove"), key=f"rmv_sku_{i}"):
                     supplier_skus.pop(i)
                     st.rerun()
-        if st.button("Add Another SKU"):
+        if st.button(T("add_another_sku")):
             supplier_skus.append({"sku": "", "qty": 1})
             st.rerun()
         st.markdown("---")
-        with st.expander("➕ Create New SKU"):
-            new_sku = st.text_input("New SKU Name", key="supplier_new_sku")
-            if st.button("Add SKU", key="supplier_add_sku"):
+        with st.expander(T("create_new_sku")):
+            new_sku = st.text_input(T("new_sku_name"), key="supplier_new_sku")
+            if st.button(T("add_sku"), key="supplier_add_sku"):
                 if new_sku.strip():
                     query("INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
                           (new_sku.strip(), new_sku.strip(), "Hub 1,Hub 2,Hub 3,Retail"), fetch=False)
@@ -273,7 +273,7 @@ if menu == "Shipments":
                     st.rerun()
                 else:
                     st.warning("Enter a SKU name.")
-        submitted = st.button("Submit Shipment")
+        submitted = st.button(T("submit_shipment"))
         if submitted:
             if tracking and carrier and all(e["sku"] for e in supplier_skus):
                 skus_str = ", ".join([f"{e['sku']} x {e['qty']}" for e in supplier_skus if e["sku"]])
@@ -281,14 +281,14 @@ if menu == "Shipments":
                     INSERT INTO shipments (supplier, tracking, carrier, hub, skus, date, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (username, tracking.strip(), carrier.strip(), hub_dest, skus_str, str(date), "Pending"), fetch=False)
-                st.success("Shipment submitted successfully!")
+                st.success(T("shipment_submitted"))
                 st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
                 st.rerun()
             else:
-                st.error("Please fill out all required fields and SKUs.")
+                st.error(T("fill_out_required"))
         # Supplier shipment history & delete option
         my_shipments = query("SELECT * FROM shipments WHERE supplier=? AND status!='Deleted' ORDER BY id DESC", (username,))
-        st.markdown("### Your Shipments")
+        st.markdown("### " + T("your_shipments"))
         if my_shipments:
             df_my = pd.DataFrame(my_shipments, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
             for idx, row in df_my.iterrows():
@@ -304,12 +304,52 @@ if menu == "Shipments":
                             st.success(f"Shipment {row['ID']} deleted.")
                             st.rerun()
         else:
-            st.info("You have not submitted any shipments yet.")
-    else:
-        # Admin and others see all shipments
+            st.info(T("no_shipments"))
+
+    elif role == "Hub Manager":
+        st.header("📦 Shipments To Your Hub")
+        shipments = query("SELECT * FROM shipments WHERE hub=? AND status!='Deleted' ORDER BY date DESC", (hub,))
+        if shipments:
+            df_ship = pd.DataFrame(shipments, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
+            for idx, row in df_ship.iterrows():
+                with st.expander(f"Shipment ID {row['ID']} from {row['Supplier']} - Status: {row['Status']}"):
+                    st.write(f"Tracking: {row['Tracking']}")
+                    st.write(f"Carrier: {row['Carrier']}")
+                    st.write(f"SKUs: {row['SKUs']}")
+                    st.write(f"Date: {row['Date']}")
+                    if row['Status'] == "Pending":
+                        confirm = st.checkbox(f"Confirm received shipment {row['ID']}", key=f"confirm_{row['ID']}")
+                        if confirm:
+                            sku_list = [s.strip() for s in row["SKUs"].split(",") if s.strip()]
+                            for sku in sku_list:
+                                if ' x ' in sku:
+                                    name, qty = sku.rsplit(' x ', 1)
+                                    try:
+                                        qty = int(qty)
+                                    except:
+                                        qty = 1
+                                else:
+                                    name = sku
+                                    qty = 1
+                                current = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (name, hub))
+                                curr_qty = current[0][0] if current else 0
+                                new_qty = curr_qty + qty
+                                query("INSERT INTO inventory (sku, hub, quantity) VALUES (?, ?, ?) ON CONFLICT(sku, hub) DO UPDATE SET quantity=?",
+                                      (name, hub, new_qty, new_qty), fetch=False)
+                                query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                      (datetime.now().isoformat(), username, name, hub, "IN", qty, f"Shipment {row['ID']}"), fetch=False)
+                            query("UPDATE shipments SET status='Received' WHERE id=?", (row['ID'],), fetch=False)
+                            st.success(f"Shipment {row['ID']} confirmed received and inventory updated.")
+                            st.rerun()
+        else:
+            st.info("No shipments to your hub found.")
+
+    else:  # Admin and others
+        st.header("📦 All Shipments")
         rows = query("SELECT * FROM shipments WHERE status!='Deleted' ORDER BY id DESC")
         df = pd.DataFrame(rows, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
         st.dataframe(df, use_container_width=True)
+
         pending = df[df["Status"] == "Pending"]
         if not pending.empty:
             st.subheader("Mark Shipment as Received")
@@ -339,6 +379,7 @@ if menu == "Shipments":
                     query("UPDATE shipments SET status='Received' WHERE id=?", (to_confirm,), fetch=False)
                     st.success("Inventory updated from shipment!")
                     st.rerun()
+
         # Admin delete shipment
         if role == "Admin":
             st.markdown("---")
@@ -351,43 +392,6 @@ if menu == "Shipments":
                     st.success(f"Shipment {delete_id} deleted.")
                     st.rerun()
 
-# --- Incoming Shipments for Hub Managers ---
-if menu == "Incoming Shipments" and role == "Hub Manager":
-    st.header("📦 Incoming Shipments to Your Hub")
-    incoming = query("SELECT * FROM shipments WHERE hub=? AND status='Pending' ORDER BY date DESC", (hub,))
-    if incoming:
-        df_in = pd.DataFrame(incoming, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
-        for idx, row in df_in.iterrows():
-            with st.expander(f"Shipment ID {row['ID']} from {row['Supplier']}"):
-                st.write(f"Tracking: {row['Tracking']}")
-                st.write(f"Carrier: {row['Carrier']}")
-                st.write(f"SKUs: {row['SKUs']}")
-                st.write(f"Date: {row['Date']}")
-                confirm = st.checkbox(f"Confirm received shipment {row['ID']}", key=f"confirm_{row['ID']}")
-                if confirm:
-                    sku_list = [s.strip() for s in row["SKUs"].split(",") if s.strip()]
-                    for sku in sku_list:
-                        if ' x ' in sku:
-                            name, qty = sku.rsplit(' x ', 1)
-                            try:
-                                qty = int(qty)
-                            except:
-                                qty = 1
-                        else:
-                            name = sku
-                            qty = 1
-                        current = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (name, hub))
-                        curr_qty = current[0][0] if current else 0
-                        new_qty = curr_qty + qty
-                        query("INSERT INTO inventory (sku, hub, quantity) VALUES (?, ?, ?) ON CONFLICT(sku, hub) DO UPDATE SET quantity=?",
-                              (name, hub, new_qty, new_qty), fetch=False)
-                        query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              (datetime.now().isoformat(), username, name, hub, "IN", qty, f"Shipment {row['ID']}"), fetch=False)
-                    query("UPDATE shipments SET status='Received' WHERE id=?", (row['ID'],), fetch=False)
-                    st.success(f"Shipment {row['ID']} confirmed received and inventory updated.")
-                    st.rerun()
-    else:
-        st.info("No pending shipments for your hub.")
 
 # --- Messages ---
 if menu == "Messages":
