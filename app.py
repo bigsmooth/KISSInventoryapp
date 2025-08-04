@@ -251,7 +251,7 @@ if menu == "Shipments":
                     (username, tracking.strip(), carrier.strip(), hub_dest, skus_str, str(date), "Pending"), fetch=False)
                 st.success("Shipment submitted successfully!")
                 st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Please fill out all required fields and SKUs.")
 
