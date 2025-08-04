@@ -133,11 +133,15 @@ def seed_users():
 
 def setup_db():
     create_tables()
-    seed_all_skus()
     seed_users()
 
 if not Path(DB).exists():
-    setup_db()
+    create_tables()
+    seed_all_skus()   # Only add SKUs if DB is new
+    seed_users()
+else:
+    setup_db()        # Only makes sure tables/users exist, no deletes!
+
 
 def login(username, password):
     hashed = hashlib.sha256(password.encode()).hexdigest()
@@ -200,39 +204,274 @@ menus = {
 }
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
+# KISS Inventory Management App (Supplier Multilingual & Shipment History)
+import streamlit as st
+import sqlite3
+import pandas as pd
+from datetime import datetime
+from pathlib import Path
+import hashlib
+import io
+
+# --- Configurable DB Path ---
+DB = Path(__file__).parent / "ttt_inventory.db"
+
+def query(sql, params=(), fetch=True):
+    with sqlite3.connect(DB) as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        conn.commit()
+        return cur.fetchall() if fetch else None
+
+# --- Language Translations ---
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "en"
+lang = st.sidebar.selectbox("🌐 Language", ["English", "中文"], index=0 if st.session_state["lang"]=="en" else 1)
+st.session_state["lang"] = "en" if lang=="English" else "zh"
+
+def T(key):
+    return translations[st.session_state["lang"]].get(key, key)
+
+translations = {
+    "en": {
+        "supplier_shipments": "🚚 Supplier Shipments",
+        "add_skus": "Add one or more SKUs for this shipment.",
+        "tracking_number": "Tracking Number",
+        "carrier": "Carrier Name",
+        "destination_hub": "Destination Hub",
+        "shipping_date": "Shipping Date",
+        "sku": "SKU",
+        "qty": "Qty",
+        "remove": "Remove",
+        "add_another_sku": "Add Another SKU",
+        "create_new_sku": "➕ Create New SKU",
+        "new_sku_name": "New SKU Name",
+        "add_sku": "Add SKU",
+        "submit_shipment": "Submit Shipment",
+        "shipment_submitted": "Shipment submitted successfully!",
+        "fill_out_required": "Please fill out all required fields and SKUs.",
+        "your_shipments": "📦 Your Shipments",
+        "no_shipments": "You have not submitted any shipments yet.",
+    },
+    "zh": {
+        "supplier_shipments": "🚚 供应商发货",
+        "add_skus": "为此发货添加一个或多个SKU。",
+        "tracking_number": "追踪号码",
+        "carrier": "承运人名称",
+        "destination_hub": "目的中心",
+        "shipping_date": "发货日期",
+        "sku": "SKU",
+        "qty": "数量",
+        "remove": "移除",
+        "add_another_sku": "添加另一个SKU",
+        "create_new_sku": "➕ 新建SKU",
+        "new_sku_name": "新SKU名称",
+        "add_sku": "添加SKU",
+        "submit_shipment": "提交发货",
+        "shipment_submitted": "发货已成功提交！",
+        "fill_out_required": "请填写所有必填字段和SKU。",
+        "your_shipments": "📦 您的发货记录",
+        "no_shipments": "您还没有提交任何发货。",
+    }
+}
+
+# --- DB Setup ---
+def create_tables():
+    query("""CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        role TEXT,
+        hub TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS inventory (
+        sku TEXT,
+        hub TEXT,
+        quantity INTEGER,
+        PRIMARY KEY (sku, hub))""")
+    query("""CREATE TABLE IF NOT EXISTS logs (
+        timestamp TEXT,
+        user TEXT,
+        sku TEXT,
+        hub TEXT,
+        action TEXT,
+        qty INTEGER,
+        comment TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS sku_info (
+        sku TEXT PRIMARY KEY,
+        product_name TEXT,
+        assigned_hubs TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS shipments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier TEXT,
+        tracking TEXT,
+        carrier TEXT,
+        hub TEXT,
+        skus TEXT,
+        date TEXT,
+        status TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT,
+        receiver TEXT,
+        message TEXT,
+        thread TEXT,
+        timestamp TEXT)""")
+    query("""CREATE TABLE IF NOT EXISTS count_confirmations (
+        username TEXT,
+        hub TEXT,
+        confirmed_at TEXT)""")
+
+def seed_all_skus():
+    query("DELETE FROM sku_info", fetch=False)
+    query("DELETE FROM inventory", fetch=False)
+    query("DELETE FROM logs", fetch=False)
+    hub_assignments = {
+        "Hub 1": ["All American Stripes", "Carolina Blue and White Stripes", "Navy and Silver Stripes",
+                  "Black and Hot Pink Stripes", "Bubble Gum and White Stripes", "White and Ice Blue Stripes",
+                  "Imperial Purple and White Stripes", "Hot Pink and White Stripes", "Rainbow Stripes",
+                  "Twilight Pop", "Juicy Purple", "Lovely Lilac", "Black", "Black and White Stripes"],
+        "Hub 2": ["Black and Yellow Stripes", "Orange and Black Stripes", "Black and Purple Stripes",
+                  "Electric Blue and White Stripes", "Blossom Breeze", "Candy Cane Stripes",
+                  "Plum Solid", "Patriots (Custom)", "Snow Angel (Custom)", "Cranberry Frost (Custom)",
+                  "Witchy Vibes", "White and Green Stripes", "Black Solid", "Black and White Stripes"],
+        "Hub 3": ["Black and Grey Stripes", "Black and Green Stripes", "Smoke Grey and Black Stripes",
+                  "Black and Red Stripes", "Dark Cherry and White Stripes", "Black and Multicolor Stripes",
+                  "Puerto Rican (Custom)", "Seahawks (Custom)", "PCH (Custom)", "Valentine Socks",
+                  "Rainbow Stripes", "Thin Black Socks", "Thin Black and White Stripes",
+                  "Smoke Grey Solid", "Cherry Solid", "Brown Solid", "Wheat and White Stripes",
+                  "Black Solid", "Black and White Stripes"]
+    }
+    retail_skus = [
+        "Black Solid", "Bubblegum", "Tan Solid", "Hot Pink Solid", "Brown Solid", "Dark Cherry Solid",
+        "Winter White Solid", "Coral Orange", "Navy Solid", "Electric Blue Solid", "Celtic Green",
+        "Cherry Solid", "Smoke Grey Solid", "Chartreuse Green", "Lovely Lilac", "Carolina Blue Solid",
+        "Juicy Purple", "Green & Red Spaced Stripes", "Winter Green Stripes", "Midnight Frost Stripes",
+        "Witchy Vibes Stripes", "Light Purple & White Spaced Stripes", "Peppermint Stripes",
+        "Red & Black Spaced Stripes", "Gothic Chic Stripes", "Sugar Rush Stripes", "Emerald Onyx Stripes",
+        "Pumpkin Spice Stripes", "Pink & White Spaced Stripes", "All American Stripes",
+        "Candy Cane Stripes", "Blossom Breeze", "White and Ice Blue Stripes", "Christmas Festive Stripes",
+        "White w/ Black stripes", "Navy w/ White stripes", "Cyan w/ White stripes",
+        "Celtic Green and White Stripes", "Twilight Pop", "Black and Multicolor Stripes",
+        "Black w/ Pink stripes", "Black and Yellow Stripes", "BHM", "Solar Glow", "Navy and Silver Stripes",
+        "Cherry and White Stripes", "Wheat and White Stripes", "Brown w/ White stripes",
+        "White and Green Stripes", "Coral w/ White stripes", "Imperial Purple and White Stripes",
+        "Carolina Blue and White Stripes", "Smoke Grey and White Stripes", "Black w/ White stripes",
+        "Bubble Gum and White Stripes", "Dark Cherry and White Stripes", "Hot Pink w/ White stripes",
+        "Orange and Black Stripes", "Black and Orange Stripes", "Black w/Red stripes",
+        "Smoke Grey w/Black Stripes", "Royal Blue solid", "Black w/Grey stripes", "Black w/Purple stripes",
+        "Black w/Rainbow Stripes", "Black and Green Stripes", "Heart Socks", "Shamrock Socks",
+        "Plum Solid", "Pumpkin Solid", "PCH", "Cranberry Frost", "Snowy Angel", "Pats", "Seahawks",
+        "Black solid (THN)", "White solid (THN)", "Black w/ White stripes (THN)", "Yellow (THN)",
+        "Black w/Red stripes (THN)", "Black w/Pink stripes (THN)", "Hot Pink w/White stripes (THN)",
+        "Black Solid (SHORT)", "White Solid (SHORT)", "Black and White Stripes (SHORT)"
+    ]
+    all_skus = set(retail_skus)
+    for hub_list in hub_assignments.values():
+        all_skus.update(hub_list)
+    for sku in sorted(all_skus):
+        assigned = [hub for hub, skus in hub_assignments.items() if sku in skus]
+        if sku in retail_skus:
+            assigned.append("Retail")
+        query("INSERT OR REPLACE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
+              (sku, sku, ",".join(sorted(set(assigned)))), fetch=False)
+        for h in assigned:
+            query("INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)", (sku, h, 0), fetch=False)
+
+def seed_users():
+    users = [
+        ("kevin", "Admin", "HQ", "adminpass"),
+        ("fox", "Hub Manager", "Hub 2", "foxpass"),
+        ("smooth", "Retail", "Retail", "retailpass"),
+        ("carmen", "Hub Manager", "Hub 3", "hub3pass"),
+        ("slo", "Hub Manager", "Hub 1", "hub1pass"),
+        ("vendor", "Supplier", "", "shipit")
+    ]
+    for u, r, h, p in users:
+        pw = hashlib.sha256(p.encode()).hexdigest()
+        query("INSERT OR IGNORE INTO users (username, password, role, hub) VALUES (?, ?, ?, ?)", (u, pw, r, h))
+
+def setup_db():
+    create_tables()
+    seed_all_skus()
+    seed_users()
+
+if not Path(DB).exists():
+    setup_db()
+
+def login(username, password):
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    u = query("SELECT username, role, hub FROM users WHERE username=? AND password=?", (username, hashed))
+    return u[0] if u else None
+
+def count_unread(username):
+    threads = query("SELECT DISTINCT thread FROM messages WHERE receiver=?", (username,))
+    unread = 0
+    for t in threads:
+        msgs = query("SELECT sender FROM messages WHERE thread=? ORDER BY timestamp DESC LIMIT 1", (t[0],))
+        if msgs and msgs[0][0] != username:
+            unread += 1
+    return unread
+
+if 'user' not in st.session_state:
+    st.sidebar.title("🔐 Login")
+    u = st.sidebar.text_input("Username")
+    p = st.sidebar.text_input("Password", type="password")
+    if st.sidebar.button("Login"):
+        user = login(u, p)
+        if user:
+            st.session_state.user = user
+            st.rerun()
+        else:
+            st.sidebar.error("Invalid credentials")
+    st.stop()
+
+username, role, hub = st.session_state.user
+unread = count_unread(username)
+st.sidebar.success(f"Welcome, {username} ({role})")
+st.sidebar.markdown(f"📨 **Unread Threads: {unread}**")
+if st.sidebar.button("🚪 Logout"):
+    del st.session_state.user
+    st.rerun()
+
+menus = {
+    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
+    "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
+    "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
+    "Supplier": ["Shipments"]
+}
+menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
+
 # --- Sleek Supplier Shipments: Bulk Table UI ---
 if menu == "Shipments":
-    st.header("🚚 Supplier Shipments")
+    st.header(T("supplier_shipments"))
     if role == "Supplier":
-        st.markdown("**Add one or more SKUs for this shipment.**")
-        tracking = st.text_input("Tracking Number")
-        carrier = st.text_input("Carrier Name")
-        hub_dest = st.selectbox("Destination Hub", ["Hub 1", "Hub 2", "Hub 3", "Retail"])
-        date = st.date_input("Shipping Date", value=datetime.today())
+        st.markdown("**" + T("add_skus") + "**")
+        tracking = st.text_input(T("tracking_number"))
+        carrier = st.text_input(T("carrier"))
+        hub_dest = st.selectbox(T("destination_hub"), ["Hub 1", "Hub 2", "Hub 3", "Retail"])
+        date = st.date_input(T("shipping_date"), value=datetime.today())
         # --- Dynamic Multi-SKU Entry ---
         if "supplier_skus" not in st.session_state:
             st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
         supplier_skus = st.session_state["supplier_skus"]
         all_sku_options = [s[0] for s in query("SELECT sku FROM sku_info")]
-
         for i, entry in enumerate(supplier_skus):
             cols = st.columns([4,2,1])
             with cols[0]:
-                entry["sku"] = st.selectbox(f"SKU {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
+                entry["sku"] = st.selectbox(f"{T('sku')} {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
             with cols[1]:
-                entry["qty"] = st.number_input(f"Qty {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
+                entry["qty"] = st.number_input(f"{T('qty')} {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
             with cols[2]:
-                if st.button("Remove", key=f"rmv_sku_{i}"):
+                if st.button(T("remove"), key=f"rmv_sku_{i}"):
                     supplier_skus.pop(i)
                     st.rerun()
-        if st.button("Add Another SKU"):
+        if st.button(T("add_another_sku")):
             supplier_skus.append({"sku": "", "qty": 1})
             st.experimental_rerun()
 
         st.markdown("---")
-        with st.expander("➕ Create New SKU"):
-            new_sku = st.text_input("New SKU Name", key="supplier_new_sku")
-            if st.button("Add SKU", key="supplier_add_sku"):
+        with st.expander(T("create_new_sku")):
+            new_sku = st.text_input(T("new_sku_name"), key="supplier_new_sku")
+            if st.button(T("add_sku"), key="supplier_add_sku"):
                 if new_sku.strip():
                     query("INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
                         (new_sku.strip(), new_sku.strip(), "Hub 1,Hub 2,Hub 3,Retail"), fetch=False)
@@ -241,7 +480,7 @@ if menu == "Shipments":
                 else:
                     st.warning("Enter a SKU name.")
 
-        submitted = st.button("Submit Shipment")
+        submitted = st.button(T("submit_shipment"))
         if submitted:
             if tracking and carrier and all(e["sku"] for e in supplier_skus):
                 skus_str = ", ".join([f"{e['sku']} x {e['qty']}" for e in supplier_skus if e["sku"]])
@@ -249,13 +488,23 @@ if menu == "Shipments":
                     INSERT INTO shipments (supplier, tracking, carrier, hub, skus, date, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (username, tracking.strip(), carrier.strip(), hub_dest, skus_str, str(date), "Pending"), fetch=False)
-                st.success("Shipment submitted successfully!")
+                st.success(T("shipment_submitted"))
                 st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
                 st.rerun()
             else:
-                st.error("Please fill out all required fields and SKUs.")
+                st.error(T("fill_out_required"))
+
+        # --- Supplier: Shipment History ---
+        my_shipments = query("SELECT * FROM shipments WHERE supplier=? ORDER BY id DESC", (username,))
+        st.markdown("### " + T("your_shipments"))
+        if my_shipments:
+            df_my = pd.DataFrame(my_shipments, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
+            st.dataframe(df_my, use_container_width=True)
+        else:
+            st.info(T("no_shipments"))
 
     else:
+        # ... The rest of your existing code for non-supplier roles handling shipments ...
         rows = query("SELECT * FROM shipments ORDER BY id DESC")
         df = pd.DataFrame(rows, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
         st.dataframe(df, use_container_width=True)
@@ -287,56 +536,89 @@ if menu == "Shipments":
                 st.success("Inventory updated from shipment!")
                 st.rerun()
 
+# ---- rest of your unchanged code below... (Inventory, Bulk Update, Logs, etc.) ----
+
 
 # --- Messages ---
 if menu == "Messages":
     st.header("📢 Internal Messaging")
+    # 1. Recipients
     if role == "Admin":
         users = [u[0] for u in query("SELECT username FROM users WHERE username != ?", (username,))]
+        to_label = "To (user):"
+        subject_placeholder = "Thread Subject (optional)"
     else:
         users = [u[0] for u in query("SELECT username FROM users WHERE role='Admin'")]
+        to_label = "To HQ:"
+        subject_placeholder = "Auto (leave blank)"
     st.subheader("Send New Message")
-    recipient = st.selectbox("To", users)
-    thread = st.text_input("Thread Subject")
-    msg = st.text_area("Message")
+    recipient = st.selectbox(to_label, users)
+    thread = st.text_input("Subject", placeholder=subject_placeholder)
+    msg = st.text_area("Message", placeholder="Type your message here…")
     if st.button("Send"):
+        # 2. Auto thread name if needed
+        auto_thread = thread.strip() if thread.strip() else f"{username}-{recipient}"
         query("INSERT INTO messages (sender, receiver, message, thread, timestamp) VALUES (?, ?, ?, ?, ?)",
-              (username, recipient, msg, thread or f"{username}-{recipient}", datetime.now().isoformat()), fetch=False)
+              (username, recipient, msg, auto_thread, datetime.now().isoformat()), fetch=False)
         st.success("✅ Message sent!")
         st.rerun()
+
     st.markdown("---")
     st.subheader("📨 Your Threads")
-    threads = query("SELECT DISTINCT thread FROM messages WHERE sender=? OR receiver=?", (username, username))
+    # 3. Show latest thread first
+    threads = query("SELECT DISTINCT thread FROM messages WHERE sender=? OR receiver=? ORDER BY timestamp DESC", (username, username))
     for t in threads:
-        with st.expander(f"🧵 {t[0]}"):
-            thread_msgs = query("SELECT timestamp, sender, message FROM messages WHERE thread=? ORDER BY timestamp", (t[0],))
+        thread_msgs = query("SELECT timestamp, sender, message FROM messages WHERE thread=? ORDER BY timestamp", (t[0],))
+        last_msg = thread_msgs[-1] if thread_msgs else None
+        last_from = last_msg[1] if last_msg else ""
+        unread = last_from != username
+        label = f"🧵 {t[0]}"
+        if unread:
+            label = f"**🔵 {label}**"
+        with st.expander(label):
             for m in thread_msgs:
                 st.markdown(f"**{m[1]}** ({m[0]}): {m[2]}")
-            show_reply = st.checkbox("Reply", key=f"reply_toggle_{t[0]}")
-            if show_reply:
-                reply = st.text_input("Your Reply", key=f"reply_input_{t[0]}")
-                if st.button("Send Reply", key=f"reply_btn_{t[0]}"):
-                    last_receiver = [m[1] for m in reversed(thread_msgs) if m[1] != username]
-                    reply_to = last_receiver[0] if last_receiver else username
-                    if role == "Admin" or reply_to == "testadmin":
-                        query("INSERT INTO messages (sender, receiver, message, thread, timestamp) VALUES (?, ?, ?, ?, ?)",
-                              (username, reply_to, reply, t[0], datetime.now().isoformat()), fetch=False)
-                        st.rerun()
-                    else:
-                        st.warning("Only messages to HQ are allowed.")
+            # 4. Simple reply—show inline, no extra click
+            reply = st.text_input("Reply", key=f"reply_input_{t[0]}", placeholder="Type your reply here…")
+            if st.button("Send Reply", key=f"reply_btn_{t[0]}"):
+                # Admin can reply to anyone, others reply to last sender (if admin)
+                last_receiver = [m[1] for m in reversed(thread_msgs) if m[1] != username]
+                reply_to = last_receiver[0] if last_receiver else users[0]
+                if role == "Admin" or reply_to in users:
+                    query("INSERT INTO messages (sender, receiver, message, thread, timestamp) VALUES (?, ?, ?, ?, ?)",
+                          (username, reply_to, reply, t[0], datetime.now().isoformat()), fetch=False)
+                    st.rerun()
+                else:
+                    st.warning("Only reply to HQ is allowed.")
 
 # --- Logs ---
 if menu == "Logs":
     st.header("📜 Activity Logs")
     logs = query("SELECT * FROM logs ORDER BY timestamp DESC")
     df = pd.DataFrame(logs, columns=["Time", "User", "SKU", "Hub", "Action", "Qty", "Comment"])
-    search = st.text_input("Filter logs by keyword")
+
+    # 1. Add placeholder
+    search = st.text_input("🔎 Filter logs", placeholder="Type keyword, SKU, user, action...")
+
     if search:
         df = df[df.apply(lambda row: search.lower() in row.astype(str).str.lower().to_string(), axis=1)]
-    st.dataframe(df, use_container_width=True)
-    buffer = io.BytesIO()
-    df.to_csv(buffer, index=False)
-    st.download_button("📥 Export Logs", buffer.getvalue(), "logs.csv", "text/csv")
+
+    # 2. Optional: Style for high/low actions (shows color on OUT actions or Qty >= 10)
+    def highlight_row(row):
+        color = ''
+        if row['Action'] == 'OUT' and row['Qty'] > 0:
+            color = 'background-color: #f9dada;' # light red for OUT
+        elif row['Qty'] >= 10:
+            color = 'background-color: #e1faea;' # light green for big IN
+        return [color] * len(row)
+
+    st.dataframe(df.style.apply(highlight_row, axis=1), use_container_width=True)
+
+    # 3. Export at the top, easy to see
+    buff = io.BytesIO()
+    df.to_csv(buff, index=False)
+    st.download_button("📥 Download CSV of Logs", buff.getvalue(), "logs.csv", "text/csv")
+
 
 # --- Count Mode ---
 if menu == "Count":
@@ -346,19 +628,38 @@ if menu == "Count":
     if role != "Admin":
         q += " WHERE hub=?"
         f = (hub,)
-    data = query(q, f)
-    df = pd.DataFrame(data, columns=["SKU", "Hub", "Qty"])
-    df['Status'] = df['Qty'].apply(lambda x: "🟥 Low" if x < 10 else "✅ OK")
+    
+    def load_data():
+        data = query(q, f)
+        df = pd.DataFrame(data, columns=["SKU", "Hub", "Qty"])
+        df['Status'] = df['Qty'].apply(lambda x: "🟥 Low" if x < 10 else "✅ OK")
+        return df
+    
+    df = load_data()
     st.dataframe(df, use_container_width=True)
-    if role != "Admin" and st.button("✅ Confirm Inventory Count"):
-        query("INSERT INTO count_confirmations VALUES (?, ?, ?)", (username, hub, datetime.now().isoformat()), fetch=False)
-        st.success("Count confirmed.")
-        st.rerun()
+    
+    if role != "Admin":
+        if st.button("✅ Confirm Inventory Count"):
+            query("INSERT INTO count_confirmations (username, hub, confirmed_at) VALUES (?, ?, ?)",
+                  (username, hub, datetime.now().isoformat()), fetch=False)
+            st.success("Count confirmed.")
+            # Instead of st.experimental_rerun(), show message to refresh:
+            st.info("Please refresh the page to see updates.")
+        
+        if st.button("🔄 Refresh"):
+            df = load_data()
+            st.dataframe(df, use_container_width=True)
+    
     if role == "Admin":
         confirms = query("SELECT * FROM count_confirmations ORDER BY confirmed_at DESC")
         df_confirm = pd.DataFrame(confirms, columns=["User", "Hub", "Time"])
         st.subheader("Confirmed Counts")
         st.dataframe(df_confirm, use_container_width=True)
+        if st.button("🔄 Refresh Confirmations"):
+            confirms = query("SELECT * FROM count_confirmations ORDER BY confirmed_at DESC")
+            df_confirm = pd.DataFrame(confirms, columns=["User", "Hub", "Time"])
+            st.dataframe(df_confirm, use_container_width=True)
+
 
 # --- Inventory ---
 if menu == "Inventory":
@@ -409,22 +710,42 @@ if menu == "Bulk Update":
     st.header("📝 Bulk Inventory Update")
     rows = query("SELECT sku, quantity FROM inventory WHERE hub=?", (hub,))
     df = pd.DataFrame(rows, columns=["SKU", "Current Qty"])
+
     with st.form("bulk_update_form"):
         st.info("Enter a positive number for IN, negative for OUT. Leave blank to skip. Comments optional.")
         update_data = []
         for idx, row in df.iterrows():
             with st.expander(f"{row['SKU']}  (Current: {row['Current Qty']})", expanded=False):
-                adj = st.text_input("Adjust Quantity (+IN / -OUT)", value="", key=f"adj_{row['SKU']}")
-                comment = st.text_input("Comment", value="", key=f"comm_{row['SKU']}", placeholder="Optional")
+                adj = st.text_input(
+                    "Adjust Quantity (+IN / -OUT)", 
+                    value="", 
+                    key=f"adj_{idx}_{row['SKU']}",
+                    placeholder="+5 or -3"
+                )
+                comment = st.text_input(
+                    "Comment", 
+                    value="", 
+                    key=f"comm_{idx}_{row['SKU']}", 
+                    placeholder="Optional"
+                )
                 update_data.append((row["SKU"], adj, comment))
         submitted = st.form_submit_button("Apply All Updates")
+
     if submitted:
         errors = []
         results = []
+        big_change = False
+        any_change = False
         for sku, adj, comment in update_data:
-            try: n = int(adj.strip()) if adj.strip() else 0
-            except: n = 0
-            if n == 0: continue
+            try:
+                n = int(adj.strip()) if adj.strip() else 0
+            except:
+                n = 0
+            if n == 0:
+                continue
+            any_change = True
+            if abs(n) >= 10:
+                big_change = True
             record = query("SELECT quantity FROM inventory WHERE sku=? AND hub=?", (sku, hub))
             current = record[0][0] if record else 0
             new_qty = current + n
@@ -439,11 +760,23 @@ if menu == "Bulk Update":
             query("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?)",
                   (datetime.now().isoformat(), username, sku, hub, action, abs(n), comment), fetch=False)
             results.append(f"{sku}: {action} {abs(n)} (Now: {new_qty})")
-        if errors:
-            st.warning("Some updates failed:\n" + "\n".join(errors))
-        if results:
-            st.success("✅ Bulk update complete!\n\n" + "\n".join(results))
+
+        if not any_change:
+            st.info("No changes submitted.")
+        else:
+            if errors:
+                st.warning("Some updates failed:\n" + "\n".join(errors))
+            if results:
+                st.success("✅ Bulk update complete!\n\n" + "\n".join(results))
+                # Show last 3 actions for context
+                logs = query("SELECT timestamp, sku, action, qty, comment FROM logs WHERE hub=? ORDER BY timestamp DESC LIMIT 3", (hub,))
+                if logs:
+                    st.markdown("#### Last 3 Inventory Actions:")
+                    st.table(pd.DataFrame(logs, columns=["Time", "SKU", "Action", "Qty", "Comment"]))
+            if big_change:
+                st.balloons()
         st.rerun()
+
 
 # --- Create SKU ---
 if menu == "Create SKU":
