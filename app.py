@@ -174,7 +174,7 @@ username, role, hub = st.session_state.user
 unread = count_unread(username)
 st.sidebar.success(f"Welcome, {username} ({role})")
 st.sidebar.markdown(f"📨 **Unread Threads: {unread}**")
-if st.sidebar.button("🚪 Logout"):
+if st.sidebar.button("🚪 Logout", key="logout_btn"):
     del st.session_state.user
     st.rerun()
 
