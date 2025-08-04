@@ -224,7 +224,7 @@ if menu == "Shipments":
             with cols[2]:
                 if st.button("Remove", key=f"rmv_sku_{i}"):
                     supplier_skus.pop(i)
-                    st.experimental_rerun()
+                    st.rerun()
         if st.button("Add Another SKU"):
             supplier_skus.append({"sku": "", "qty": 1})
             st.experimental_rerun()
