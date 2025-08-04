@@ -16,7 +16,15 @@ def query(sql, params=(), fetch=True):
         conn.commit()
         return cur.fetchall() if fetch else None
 
-# --- Language translations ---
+# --- Language Translations ---
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "en"
+lang = st.sidebar.selectbox("🌐 Language", ["English", "中文"], index=0 if st.session_state["lang"]=="en" else 1)
+st.session_state["lang"] = "en" if lang=="English" else "zh"
+
+def T(key):
+    return translations[st.session_state["lang"]].get(key, key)
+
 translations = {
     "en": {
         "supplier_shipments": "🚚 Supplier Shipments",
@@ -60,15 +68,6 @@ translations = {
     }
 }
 
-if "lang" not in st.session_state:
-    st.session_state["lang"] = "en"
-lang = st.sidebar.selectbox("🌐 Language", ["English", "中文"], index=0 if st.session_state["lang"] == "en" else 1)
-st.session_state["lang"] = "en" if lang == "English" else "zh"
-
-def T(key):
-    return translations[st.session_state["lang"]].get(key, key)
-
-# --- DB Setup ---
 def create_tables():
     query("""CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
@@ -114,7 +113,7 @@ def create_tables():
         confirmed_at TEXT)""")
 
 def seed_all_skus():
-    # Do not delete existing data; only add missing SKUs and inventories
+    # Note: Not deleting existing data here to preserve inventory/logs/users
     hub_assignments = {
         "Hub 1": ["All American Stripes", "Carolina Blue and White Stripes", "Navy and Silver Stripes",
                   "Black and Hot Pink Stripes", "Bubble Gum and White Stripes", "White and Ice Blue Stripes",
@@ -132,7 +131,6 @@ def seed_all_skus():
                   "Black Solid", "Black and White Stripes"]
     }
     retail_skus = [
-        # Full list from your data here...
         "Black Solid", "Bubblegum", "Tan Solid", "Hot Pink Solid", "Brown Solid", "Dark Cherry Solid",
         "Winter White Solid", "Coral Orange", "Navy Solid", "Electric Blue Solid", "Celtic Green",
         "Cherry Solid", "Smoke Grey Solid", "Chartreuse Green", "Lovely Lilac", "Carolina Blue Solid",
@@ -163,10 +161,8 @@ def seed_all_skus():
         assigned = [hub for hub, skus in hub_assignments.items() if sku in skus]
         if sku in retail_skus:
             assigned.append("Retail")
-        # Insert or update sku_info
         query("INSERT OR REPLACE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
               (sku, sku, ",".join(sorted(set(assigned)))), fetch=False)
-        # Insert inventory rows if not exist
         for h in assigned:
             query("INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)", (sku, h, 0), fetch=False)
 
@@ -185,11 +181,18 @@ def seed_users():
 
 def setup_db():
     create_tables()
-    seed_all_skus()
+    # Only seed SKUs if none exist
+    existing_skus = query("SELECT sku FROM sku_info LIMIT 1")
+    if not existing_skus:
+        seed_all_skus()
     seed_users()
 
 if not Path(DB).exists():
     setup_db()
+else:
+    # Ensure tables and users exist but don't delete data
+    create_tables()
+    seed_users()
 
 def login(username, password):
     hashed = hashlib.sha256(password.encode()).hexdigest()
@@ -205,7 +208,6 @@ def count_unread(username):
             unread += 1
     return unread
 
-# --- Login UI ---
 if 'user' not in st.session_state:
     st.sidebar.title("🔐 Login")
     u = st.sidebar.text_input("Username")
@@ -214,22 +216,19 @@ if 'user' not in st.session_state:
         user = login(u, p)
         if user:
             st.session_state.user = user
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.sidebar.error("Invalid credentials")
     st.stop()
 
 username, role, hub = st.session_state.user
 unread = count_unread(username)
-
-# Sidebar UI
 st.sidebar.success(f"Welcome, {username} ({role})")
 st.sidebar.markdown(f"📨 **Unread Threads: {unread}**")
-if st.sidebar.button("🚪 Logout"):
+if st.sidebar.button("🚪 Logout", key="logout_btn"):
     del st.session_state.user
-    st.experimental_rerun()
+    st.rerun()
 
-# Menus based on role
 menus = {
     "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
     "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
@@ -238,7 +237,7 @@ menus = {
 }
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
-# --- Shipments ---
+# --- Supplier Shipments ---
 if menu == "Shipments":
     st.header(T("supplier_shipments"))
     if role == "Supplier":
@@ -252,18 +251,18 @@ if menu == "Shipments":
         supplier_skus = st.session_state["supplier_skus"]
         all_sku_options = [s[0] for s in query("SELECT sku FROM sku_info")]
         for i, entry in enumerate(supplier_skus):
-            cols = st.columns([4, 2, 1])
+            cols = st.columns([4,2,1])
             with cols[0]:
-                entry["sku"] = st.selectbox(f"{T('sku')} {i + 1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
+                entry["sku"] = st.selectbox(f"{T('sku')} {i+1}", all_sku_options, index=all_sku_options.index(entry["sku"]) if entry["sku"] in all_sku_options else 0, key=f"supp_sku_{i}")
             with cols[1]:
-                entry["qty"] = st.number_input(f"{T('qty')} {i + 1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
+                entry["qty"] = st.number_input(f"{T('qty')} {i+1}", min_value=1, step=1, key=f"supp_qty_{i}", value=entry["qty"])
             with cols[2]:
                 if st.button(T("remove"), key=f"rmv_sku_{i}"):
                     supplier_skus.pop(i)
-                    st.experimental_rerun()
+                    st.rerun()
         if st.button(T("add_another_sku")):
             supplier_skus.append({"sku": "", "qty": 1})
-            st.experimental_rerun()
+            st.rerun()
 
         st.markdown("---")
         with st.expander(T("create_new_sku")):
@@ -273,7 +272,7 @@ if menu == "Shipments":
                     query("INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
                           (new_sku.strip(), new_sku.strip(), "Hub 1,Hub 2,Hub 3,Retail"), fetch=False)
                     st.success(f"SKU '{new_sku.strip()}' added.")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.warning("Enter a SKU name.")
 
@@ -287,7 +286,7 @@ if menu == "Shipments":
                       (username, tracking.strip(), carrier.strip(), hub_dest, skus_str, str(date), "Pending"), fetch=False)
                 st.success(T("shipment_submitted"))
                 st.session_state["supplier_skus"] = [{"sku": "", "qty": 1}]
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error(T("fill_out_required"))
 
@@ -295,9 +294,9 @@ if menu == "Shipments":
         st.markdown("### " + T("your_shipments"))
         if my_shipments:
             df_my = pd.DataFrame(my_shipments, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
+            if st.button("🔄 Refresh Shipments"):
+                st.rerun()
             st.dataframe(df_my, use_container_width=True)
-            if st.button("Refresh Shipments"):
-                st.experimental_rerun()
         else:
             st.info(T("no_shipments"))
 
@@ -331,7 +330,7 @@ if menu == "Shipments":
                           (datetime.now().isoformat(), username, name, record["Hub"], "IN", qty, f"Shipment {record['ID']}"), fetch=False)
                 query("UPDATE shipments SET status='Received' WHERE id=?", (to_confirm,), fetch=False)
                 st.success("Inventory updated from shipment!")
-                st.experimental_rerun()
+                st.rerun()
 
 # --- Messages ---
 if menu == "Messages":
@@ -353,7 +352,7 @@ if menu == "Messages":
         query("INSERT INTO messages (sender, receiver, message, thread, timestamp) VALUES (?, ?, ?, ?, ?)",
               (username, recipient, msg, auto_thread, datetime.now().isoformat()), fetch=False)
         st.success("✅ Message sent!")
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("---")
     st.subheader("📨 Your Threads")
@@ -376,7 +375,7 @@ if menu == "Messages":
                 if role == "Admin" or reply_to in users:
                     query("INSERT INTO messages (sender, receiver, message, thread, timestamp) VALUES (?, ?, ?, ?, ?)",
                           (username, reply_to, reply, t[0], datetime.now().isoformat()), fetch=False)
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.warning("Only reply to HQ is allowed.")
 
@@ -387,7 +386,6 @@ if menu == "Logs":
     df = pd.DataFrame(logs, columns=["Time", "User", "SKU", "Hub", "Action", "Qty", "Comment"])
 
     search = st.text_input("🔎 Filter logs", placeholder="Type keyword, SKU, user, action...")
-
     if search:
         df = df[df.apply(lambda row: search.lower() in row.astype(str).str.lower().to_string(), axis=1)]
 
@@ -413,36 +411,33 @@ if menu == "Count":
     if role != "Admin":
         q += " WHERE hub=?"
         f = (hub,)
-
+    
     def load_data():
         data = query(q, f)
         df = pd.DataFrame(data, columns=["SKU", "Hub", "Qty"])
         df['Status'] = df['Qty'].apply(lambda x: "🟥 Low" if x < 10 else "✅ OK")
         return df
-
+    
     df = load_data()
     st.dataframe(df, use_container_width=True)
-
+    
     if role != "Admin":
         if st.button("✅ Confirm Inventory Count"):
             query("INSERT INTO count_confirmations (username, hub, confirmed_at) VALUES (?, ?, ?)",
                   (username, hub, datetime.now().isoformat()), fetch=False)
             st.success("Count confirmed.")
             st.info("Please refresh the page to see updates.")
-
+        
         if st.button("🔄 Refresh"):
-            df = load_data()
-            st.dataframe(df, use_container_width=True)
-
+            st.rerun()
+    
     if role == "Admin":
         confirms = query("SELECT * FROM count_confirmations ORDER BY confirmed_at DESC")
         df_confirm = pd.DataFrame(confirms, columns=["User", "Hub", "Time"])
         st.subheader("Confirmed Counts")
         st.dataframe(df_confirm, use_container_width=True)
         if st.button("🔄 Refresh Confirmations"):
-            confirms = query("SELECT * FROM count_confirmations ORDER BY confirmed_at DESC")
-            df_confirm = pd.DataFrame(confirms, columns=["User", "Hub", "Time"])
-            st.dataframe(df_confirm, use_container_width=True)
+            st.rerun()
 
 # --- Inventory ---
 if menu == "Inventory":
@@ -486,7 +481,7 @@ if menu == "Update Stock":
             st.success(
                 f"✅ Inventory updated!  \n**SKU:** {sku}  \n**Hub:** {hub}  \n**Action:** {action}  \n**Qty:** {qty}  \n**New Qty:** {new_qty}"
             )
-            st.experimental_rerun()
+            st.rerun()
 
 # --- Bulk Update ---
 if menu == "Bulk Update":
@@ -557,7 +552,7 @@ if menu == "Bulk Update":
                     st.table(pd.DataFrame(logs, columns=["Time", "SKU", "Action", "Qty", "Comment"]))
             if big_change:
                 st.balloons()
-        st.experimental_rerun()
+        st.rerun()
 
 # --- Create SKU ---
 if menu == "Create SKU":
@@ -572,7 +567,7 @@ if menu == "Create SKU":
         else:
             query("INSERT INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)", (new_sku.strip(), new_sku.strip(), ""), fetch=False)
             st.success(f"✅ SKU '{new_sku}' created successfully!")
-            st.experimental_rerun()
+            st.rerun()
 
 # --- Upload SKUs ---
 if menu == "Upload SKUs":
@@ -591,7 +586,7 @@ if menu == "Upload SKUs":
                     query("INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)", (sku, name, hubs), fetch=False)
                     count += 1
             st.success(f"✅ Uploaded {count} SKUs from file.")
-            st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
 
@@ -608,7 +603,7 @@ if menu == "Assign SKUs" and role == "Admin":
         combined = ",".join(new_hubs)
         query("UPDATE sku_info SET assigned_hubs=? WHERE sku=?", (combined, sku_choice), fetch=False)
         st.success("✅ SKU assignment updated!")
-        st.experimental_rerun()
+        st.rerun()
 
 # --- User Access ---
 if menu == "User Access":
@@ -628,4 +623,4 @@ if menu == "User Access":
                 query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False)
                 st.success(f"✅ User '{selected_user}' removed.")
                 st.session_state.pop('confirm_remove_user')
-                st.experimental_rerun()
+                st.rerun()
