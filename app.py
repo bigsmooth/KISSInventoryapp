@@ -6,6 +6,9 @@ from pathlib import Path
 import hashlib
 import io
 
+def rerun():
+    st.session_state["dummy_rerun_key"] = st.session_state.get("dummy_rerun_key", 0) + 1
+
 # --- Configurable DB Path ---
 DB = Path(__file__).parent / "ttt_inventory.db"
 
@@ -99,7 +102,6 @@ def count_unread(username):
             unread += 1
     return unread
 
-# --- Login & Sidebar ---
 if 'user' not in st.session_state:
     st.sidebar.title("🔐 Login")
     u = st.sidebar.text_input("Username")
@@ -108,19 +110,18 @@ if 'user' not in st.session_state:
         user = login(u, p)
         if user:
             st.session_state.user = user
-            st.experimental_rerun()
+            rerun()
         else:
             st.sidebar.error("Invalid credentials")
     st.stop()
 
 username, role, hub = st.session_state.user
 unread = count_unread(username)
-
 st.sidebar.success(f"Welcome, {username} ({role})")
 st.sidebar.markdown(f"📨 **Unread Threads: {unread}**")
-if st.sidebar.button("🚪 Logout"):
+if st.sidebar.button("🚪 Logout", key="logout_btn"):
     del st.session_state.user
-    st.experimental_rerun()
+    rerun()
 
 # --- Menus ---
 menus = {
