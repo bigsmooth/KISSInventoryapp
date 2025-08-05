@@ -770,14 +770,16 @@ if menu == "User Access":
     st.dataframe(df_users, use_container_width=True)
     st.subheader("❌ Remove User")
     with st.form("remove_user_form"):
-        users = query("SELECT username FROM users WHERE username != ?", (username,))
-        user_list = [u[0] for u in users]
-        selected_user = st.selectbox("Select User to Remove", user_list, key="remove_user")
-        if st.form_submit_button("Request Removal"):
-            st.session_state['confirm_remove_user'] = selected_user
-        if st.session_state.get('confirm_remove_user') == selected_user:
-            if st.button(f"Really remove {selected_user}?"):
-                query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False, commit=True)
-                st.success(f"✅ User '{selected_user}' removed.")
-                st.session_state.pop('confirm_remove_user')
-                st.rerun()
+    selected_user = st.selectbox("Select User to Remove", user_list)
+    submitted = st.form_submit_button("Request Removal")
+
+    if submitted:
+    st.session_state['confirm_remove_user'] = selected_user
+
+    if st.session_state.get('confirm_remove_user') == selected_user:
+    if st.button(f"Really remove {selected_user}?"):
+        query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False)
+        st.success(f"✅ User '{selected_user}' removed.")
+        st.session_state.pop('confirm_remove_user')
+        st.rerun()
+
