@@ -250,6 +250,7 @@ menus = {
     "Supplier": ["Shipments"]
 }
 
+menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
 if menu == "Backup" and role == "Admin":
     st.header("🗄️ Backup Database")
@@ -264,8 +265,6 @@ if menu == "Restore" and role == "Admin":
         with st.expander(f"Restore '{tbl}'"):
             restore_table_from_csv(tbl)
 
-
-menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
 # --- Language Selector ---
 if "lang" not in st.session_state:
