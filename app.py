@@ -171,6 +171,44 @@ def login(username, password):
     )
     return user[0] if user else None
 
+import io
+
+def backup_database():
+    tables = ["users", "inventory", "logs", "sku_info", "shipments", "messages", "count_confirmations"]
+    for table in tables:
+        rows = query(f"SELECT * FROM {table}")
+        if not rows:
+            st.info(f"No data in table '{table}' to backup.")
+            continue
+        # Get column names dynamically
+        cols_info = query(f"PRAGMA table_info({table})", fetch=True)
+        columns = [col[1] for col in cols_info]
+        df = pd.DataFrame(rows, columns=columns)
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+        st.download_button(f"Download '{table}' Backup CSV", csv_data, file_name=f"{table}_backup.csv", mime="text/csv")
+
+def restore_table_from_csv(table_name):
+    uploaded_file = st.file_uploader(f"Upload CSV for '{table_name}'", type="csv", key=f"upload_{table_name}")
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            if df.empty:
+                st.warning("Uploaded CSV is empty.")
+                return
+            # Prepare insert query dynamically
+            cols = ", ".join(df.columns)
+            placeholders = ", ".join(["?"] * len(df.columns))
+            inserted_count = 0
+            for _, row in df.iterrows():
+                values = tuple(row[col] for col in df.columns)
+                query(f"INSERT OR REPLACE INTO {table_name} ({cols}) VALUES ({placeholders})", values, fetch=False, commit=True)
+                inserted_count += 1
+            st.success(f"Successfully restored {inserted_count} records into '{table_name}'!")
+        except Exception as e:
+            st.error(f"Error restoring table '{table_name}': {e}")    
+
 def count_unread(username):
     threads = query("SELECT DISTINCT thread FROM messages WHERE receiver=?", (username,))
     unread = 0
@@ -206,11 +244,26 @@ if st.sidebar.button("🚪 Logout", key="logout_btn"):
     st.rerun()
 
 menus = {
-    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access"],
+    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access", "Backup", "Restore"],
     "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Incoming Shipments"],
     "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
     "Supplier": ["Shipments"]
 }
+
+
+if menu == "Backup" and role == "Admin":
+    st.header("🗄️ Backup Database")
+    st.write("Download CSV backups for all main tables.")
+    backup_database()
+
+if menu == "Restore" and role == "Admin":
+    st.header("🔄 Restore Database")
+    st.write("Upload CSV files to restore data to tables. Upload one table at a time.")
+    tables = ["users", "inventory", "logs", "sku_info", "shipments", "messages", "count_confirmations"]
+    for tbl in tables:
+        with st.expander(f"Restore '{tbl}'"):
+            restore_table_from_csv(tbl)
+
 
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
