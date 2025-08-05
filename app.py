@@ -250,7 +250,62 @@ menus = {
     "Supplier": ["Shipments"]
 }
 
+
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
+
+# --- Restock Orders ---
+if menu == "Restock Orders" and role == "Admin":
+    st.header("📦 Create Restock Order")
+    
+    # Select supplier (from users with role Supplier)
+    suppliers = [u[0] for u in query("SELECT username FROM users WHERE role='Supplier'")]
+    selected_supplier = st.selectbox("Select Supplier", suppliers)
+    
+    # Select hub for order delivery
+    hubs = ["Hub 1", "Hub 2", "Hub 3", "Retail"]
+    selected_hub = st.selectbox("Select Destination Hub", hubs)
+    
+    # Select SKUs and quantities (multiple entries)
+    if "restock_items" not in st.session_state:
+        st.session_state["restock_items"] = [{"sku": "", "qty": 1}]
+    
+    all_skus = [s[0] for s in query("SELECT sku FROM sku_info")]
+    
+    for i, item in enumerate(st.session_state["restock_items"]):
+        cols = st.columns([5, 2, 1])
+        with cols[0]:
+            item["sku"] = st.selectbox(f"SKU #{i+1}", all_skus, index=all_skus.index(item["sku"]) if item["sku"] in all_skus else 0, key=f"restock_sku_{i}")
+        with cols[1]:
+            item["qty"] = st.number_input(f"Qty #{i+1}", min_value=1, step=1, value=item["qty"], key=f"restock_qty_{i}")
+        with cols[2]:
+            if st.button("Remove", key=f"restock_remove_{i}"):
+                st.session_state["restock_items"].pop(i)
+                st.experimental_rerun()
+    
+    if st.button("Add Another SKU"):
+        st.session_state["restock_items"].append({"sku": "", "qty": 1})
+    
+    if st.button("Submit Restock Order"):
+        # Validate entries
+        if not selected_supplier or not selected_hub:
+            st.warning("Please select both supplier and destination hub.")
+        elif any(not item["sku"] for item in st.session_state["restock_items"]):
+            st.warning("Please select SKU for all items.")
+        else:
+            # Prepare skus string like "SKU1 x 10, SKU2 x 5"
+            skus_str = ", ".join([f"{item['sku']} x {item['qty']}" for item in st.session_state["restock_items"]])
+            
+            # Insert restock order into shipments table as 'Restock Order' with status 'Pending'
+            query(
+                "INSERT INTO shipments (supplier, tracking, carrier, hub, skus, date, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (selected_supplier, "N/A", "N/A", selected_hub, skus_str, datetime.now().date().isoformat(), "Pending"),
+                fetch=False,
+                commit=True
+            )
+            st.success("✅ Restock order submitted!")
+            # Clear form
+            st.session_state["restock_items"] = [{"sku": "", "qty": 1}]
+
 
 # === Backup and Restore ===
 if menu == "Backup" and role == "Admin":
