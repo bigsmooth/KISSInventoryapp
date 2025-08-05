@@ -244,14 +244,15 @@ if st.sidebar.button("🚪 Logout", key="logout_btn"):
     st.rerun()
 
 menus = {
-    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access", "Backup", "Restore"],
-    "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Incoming Shipments"],
-    "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count"],
+    "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access", "Create User", "Restock Orders", "Backup", "Restore", "Google Sheets"],
+    "Hub Manager": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Incoming Shipments", "Google Sheets"],
+    "Retail": ["Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Google Sheets"],
     "Supplier": ["Shipments"]
 }
 
 menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
 
+# === Backup and Restore ===
 if menu == "Backup" and role == "Admin":
     st.header("🗄️ Backup Database")
     st.write("Download CSV backups for all main tables.")
@@ -265,72 +266,46 @@ if menu == "Restore" and role == "Admin":
         with st.expander(f"Restore '{tbl}'"):
             restore_table_from_csv(tbl)
 
+# === Create User ===
+if menu == "Create User" and role == "Admin":
+    st.header("➕ Create New User")
 
-# --- Language Selector ---
-if "lang" not in st.session_state:
-    st.session_state.lang = "en"
-lang = st.sidebar.selectbox("🌐 Language", ["English", "中文"], index=0 if st.session_state.lang=="en" else 1)
-st.session_state.lang = "en" if lang=="English" else "zh"
+    new_username = st.text_input("Username")
+    new_password = st.text_input("Password", type="password")
+    new_role = st.selectbox("Role", ["Admin", "Hub Manager", "Retail", "Supplier"])
+    new_hub = None
+    if new_role == "Hub Manager":
+        new_hub = st.selectbox("Assign Hub", ["Hub 1", "Hub 2", "Hub 3"])
+    elif new_role == "Retail":
+        new_hub = "Retail"
+    else:
+        new_hub = ""
 
-translations = {
-    "en": {
-        "supplier_shipments": "🚚 Supplier Shipments",
-        "add_skus": "Add one or more SKUs for this shipment.",
-        "tracking_number": "Tracking Number",
-        "carrier": "Carrier Name",
-        "destination_hub": "Destination Hub",
-        "shipping_date": "Shipping Date",
-        "sku": "SKU",
-        "qty": "Qty",
-        "remove": "Remove",
-        "add_another_sku": "Add Another SKU",
-        "create_new_sku": "➕ Create New SKU",
-        "new_sku_name": "New SKU Name",
-        "add_sku": "Add SKU",
-        "submit_shipment": "Submit Shipment",
-        "shipment_submitted": "Shipment submitted successfully!",
-        "fill_out_required": "Please fill out all required fields and SKUs.",
-        "your_shipments": "📦 Your Shipments",
-        "no_shipments": "You have not submitted any shipments yet.",
-        "incoming_shipments": "📦 Incoming Shipments to Your Hub",
-        "mark_received": "Mark Shipment as Received",
-        "confirm_receipt": "Confirm receipt of shipment",
-        "delete_shipment": "Delete Shipment",
-        "confirm_delete": "Confirm delete shipment",
-        "shipment_deleted": "Shipment deleted.",
-        "shipment_confirmed": "Shipment confirmed received and inventory updated."
-    },
-    "zh": {
-        "supplier_shipments": "🚚 供应商发货",
-        "add_skus": "为此发货添加一个或多个SKU。",
-        "tracking_number": "追踪号码",
-        "carrier": "承运人名称",
-        "destination_hub": "目的中心",
-        "shipping_date": "发货日期",
-        "sku": "SKU",
-        "qty": "数量",
-        "remove": "移除",
-        "add_another_sku": "添加另一个SKU",
-        "create_new_sku": "➕ 新建SKU",
-        "new_sku_name": "新SKU名称",
-        "add_sku": "添加SKU",
-        "submit_shipment": "提交发货",
-        "shipment_submitted": "发货已成功提交！",
-        "fill_out_required": "请填写所有必填字段和SKU。",
-        "your_shipments": "📦 您的发货记录",
-        "no_shipments": "您还没有提交任何发货。",
-        "incoming_shipments": "📦 您中心的待发货记录",
-        "mark_received": "标记发货为已收到",
-        "confirm_receipt": "确认收货",
-        "delete_shipment": "删除发货",
-        "confirm_delete": "确认删除发货",
-        "shipment_deleted": "发货已删除。",
-        "shipment_confirmed": "发货已确认收到，库存已更新。"
-    }
-}
+    if st.button("Create User"):
+        if not new_username.strip() or not new_password.strip():
+            st.warning("Please enter username and password.")
+        else:
+            hashed_pw = hashlib.sha256(new_password.encode()).hexdigest()
+            exists = query("SELECT username FROM users WHERE username=?", (new_username.strip(),))
+            if exists:
+                st.warning("User already exists!")
+            else:
+                query(
+                    "INSERT INTO users (username, password, role, hub) VALUES (?, ?, ?, ?)",
+                    (new_username.strip(), hashed_pw, new_role, new_hub),
+                    fetch=False,
+                    commit=True
+                )
+                st.success(f"User '{new_username.strip()}' created successfully!")
+                st.rerun()
 
-def T(key):
-    return translations[st.session_state.lang].get(key, key)
+# === Google Sheets ===
+if menu == "Google Sheets" and role in ["Admin", "Hub Manager", "Retail"]:
+    st.header("📊 Google Sheets Inventory Reference")
+    sheet_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSg2Hyk9x4Uaz2kkBh2PkoKJlnpth6evjHKX9m0FfuxXK28c6HSWYpTaYjYCzI2f5Y0bKm6YUhSCoa9/pubhtml?gid=1829911536&single=true"
+    st.markdown(f'<iframe src="{sheet_url}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
+    st.markdown(f"[Open Google Sheets in new tab]({sheet_url})")
+
 
 # --- Shipments ---
 if menu == "Shipments":
@@ -388,11 +363,23 @@ if menu == "Shipments":
             else:
                 st.error(T("fill_out_required"))
 
+        # Supplier shipment filter
+        filter_text = st.text_input("Filter Shipments (Tracking, Carrier, or Hub):").lower()
+
         # Supplier shipment history & delete option
         my_shipments = query("SELECT * FROM shipments WHERE supplier=? AND status!='Deleted' ORDER BY id DESC", (username,))
+
         st.markdown("### " + T("your_shipments"))
         if my_shipments:
             df_my = pd.DataFrame(my_shipments, columns=["ID", "Supplier", "Tracking", "Carrier", "Hub", "SKUs", "Date", "Status"])
+
+            if filter_text:
+                df_my = df_my[
+                    df_my["Tracking"].str.lower().str.contains(filter_text) |
+                    df_my["Carrier"].str.lower().str.contains(filter_text) |
+                    df_my["Hub"].str.lower().str.contains(filter_text)
+                ]
+
             for idx, row in df_my.iterrows():
                 with st.expander(f"Shipment ID {row['ID']} - Status: {row['Status']}"):
                     st.write(f"Tracking: {row['Tracking']}")
@@ -462,6 +449,7 @@ if menu == "Shipments":
                     query("UPDATE shipments SET status='Deleted' WHERE id=?", (delete_id,), fetch=False, commit=True)
                     st.success(T("shipment_deleted"))
                     st.rerun()
+
 
 # --- Incoming Shipments for Hub Managers ---
 if menu == "Incoming Shipments" and role == "Hub Manager":
@@ -577,10 +565,11 @@ if menu == "Logs":
     def highlight_row(row):
         color = ''
         if row['Action'] == 'OUT' and row['Qty'] > 0:
-            color = 'background-color: #f9dada;'
+            color = 'background-color: #b22222; color: white;'  # Firebrick red with white text
         elif row['Qty'] >= 10:
-            color = 'background-color: #e1faea;'
+            color = 'background-color: #228b22; color: white;'  # Forest green with white text
         return [color] * len(row)
+
 
     st.dataframe(df.style.apply(highlight_row, axis=1), use_container_width=True)
 
