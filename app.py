@@ -424,9 +424,12 @@ unread = count_unread(username)
 
 st.sidebar.success(f"Welcome, {username} ({role})")
 st.sidebar.markdown(f"📨 **Unread Threads: {unread}**")
-if st.sidebar.button("🚪 Logout", key="logout_btn"):
-    del st.session_state.user
-    st.rerun()
+if "user" in st.session_state:
+    user_key = st.session_state.user[0]  # username
+    if st.sidebar.button("🚪 Logout", key=f"logout_btn_{user_key}"):
+        del st.session_state.user
+        st.rerun()
+
 
 menus = {
     "Admin": ["Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs", "Create SKU", "Upload SKUs", "User Access", "Create User", "Restock Orders", "Backup", "Restore", "Google Sheets"],
