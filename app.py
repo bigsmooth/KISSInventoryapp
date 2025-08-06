@@ -365,17 +365,29 @@ def restore_table_from_csv(table_name):
             if df.empty:
                 st.warning("Uploaded CSV is empty.")
                 return
+
+            # ✅ Normalize column names
+            df.columns = df.columns.str.strip().str.lower()
+            df.rename(columns={"qty": "quantity"}, inplace=True)
+
             # Prepare insert query dynamically
             cols = ", ".join(df.columns)
             placeholders = ", ".join(["?"] * len(df.columns))
             inserted_count = 0
             for _, row in df.iterrows():
                 values = tuple(row[col] for col in df.columns)
-                query(f"INSERT OR REPLACE INTO {table_name} ({cols}) VALUES ({placeholders})", values, fetch=False, commit=True)
+                query(
+                    f"INSERT OR REPLACE INTO {table_name} ({cols}) VALUES ({placeholders})",
+                    values,
+                    fetch=False,
+                    commit=True
+                )
                 inserted_count += 1
-            st.success(f"Successfully restored {inserted_count} records into '{table_name}'!")
+
+            st.success(f"✅ Restored {inserted_count} records into '{table_name}'!")
         except Exception as e:
-            st.error(f"Error restoring table '{table_name}': {e}")    
+            st.error(f"❌ Error restoring table '{table_name}': {e}")
+   
 
 def count_unread(username):
     threads = query("SELECT DISTINCT thread FROM messages WHERE receiver=?", (username,))
