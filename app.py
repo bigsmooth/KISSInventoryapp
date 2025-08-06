@@ -496,17 +496,17 @@ if menu == "Create User" and role == "Admin":
     new_username = st.text_input("Username")
     new_password = st.text_input("Password", type="password")
     new_role = st.selectbox("Role", ["Admin", "Hub Manager", "Retail", "Supplier"])
-    new_hub = None
+
     if new_role == "Hub Manager":
         new_hub = st.selectbox("Assign Hub", ["Hub 1", "Hub 2", "Hub 3"])
     elif new_role == "Retail":
         new_hub = "Retail"
     else:
-        new_hub = ""
+        new_hub = ""  # Admin and Supplier don't need hub assignment
 
     if st.button("Create User"):
         if not new_username.strip() or not new_password.strip():
-            st.warning("Please enter username and password.")
+            st.warning("Please enter both username and password.")
         else:
             hashed_pw = hashlib.sha256(new_password.encode()).hexdigest()
             exists = query("SELECT username FROM users WHERE username=?", (new_username.strip(),))
@@ -519,7 +519,7 @@ if menu == "Create User" and role == "Admin":
                     fetch=False,
                     commit=True
                 )
-                st.success(f"User '{new_username.strip()}' created successfully!")
+                st.success(f"✅ User '{new_username.strip()}' created successfully!")
                 st.rerun()
 
 # === Google Sheets ===
@@ -969,47 +969,35 @@ if menu == "Bulk Update":
 if menu == "Create SKU":
     st.header("➕ Create New SKU")
     new_sku = st.text_input("Enter SKU Name")
-    if st.button("Create SKU"):
-        exists = query("SELECT sku FROM sku_info WHERE sku=?", (new_sku.strip(),))
-        if exists:
-            st.warning("❌ SKU already exists!")
-        elif not new_sku.strip():
-            st.warning("❗ Please enter a SKU name.")
-        else:
-            query(
-                "INSERT INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
-                (new_sku.strip(), new_sku.strip(), ""),
-                fetch=False,
-                commit=True
-            )
-            st.success(f"✅ SKU '{new_sku}' created successfully!")
-            st.rerun()
+    hubs = st.multiselect("Assign to Hubs", ["Hub 1", "Hub 2", "Hub 3", "Retail"])
 
-# --- Upload SKUs ---
-if menu == "Upload SKUs":
-    st.header("📥 Upload SKUs from CSV")
-    uploaded = st.file_uploader("Upload CSV", type="csv")
-    if uploaded:
-        try:
-            df = pd.read_csv(uploaded)
-            st.dataframe(df, use_container_width=True)
-            count = 0
-            for i, row in df.iterrows():
-                sku = row.get("sku", "").strip()
-                name = row.get("product_name", sku).strip()
-                hubs = row.get("assigned_hubs", "").strip()
-                if sku:
+    if st.button("Create SKU"):
+        if not new_sku.strip():
+            st.warning("❗ Please enter a SKU name.")
+        elif not hubs:
+            st.warning("❗ Please assign at least one hub.")
+        else:
+            exists = query("SELECT sku FROM sku_info WHERE sku=?", (new_sku.strip(),))
+            if exists:
+                st.warning("❌ SKU already exists!")
+            else:
+                hubs_str = ",".join(hubs)
+                query(
+                    "INSERT INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
+                    (new_sku.strip(), new_sku.strip(), hubs_str),
+                    fetch=False,
+                    commit=True
+                )
+                for h in hubs:
                     query(
-                        "INSERT OR IGNORE INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
-                        (sku, name, hubs),
+                        "INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)",
+                        (new_sku.strip(), h, 0),
                         fetch=False,
                         commit=True
                     )
-                    count += 1
-            st.success(f"✅ Uploaded {count} SKUs from file.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Error processing file: {e}")
+                st.success(f"✅ SKU '{new_sku}' created and assigned!")
+                st.rerun()
+
 
 # --- Assign SKUs ---
 if menu == "Assign SKUs" and role == "Admin":
