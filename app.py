@@ -1,3 +1,5 @@
+update the full scipt
+
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -2082,5 +2084,4 @@ if menu == "User Access":
             st.success(f"✅ User '{selected_user}' removed.")
             st.session_state.pop('confirm_remove_user')
             st.rerun()
-
 
