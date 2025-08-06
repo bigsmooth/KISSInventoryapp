@@ -196,7 +196,7 @@ def seed_all_skus():
             "Twilight Pop", "Juicy Purple", "Lovely Lilac", "Black", "Black and White Stripes"
         ],
         "Hub 2": [
-            "Black and Yellow Stripes", "Orange and Black Stripes", "Black and Purple Stripes", "Black and Orange",
+            "Black and Yellow Stripes", "Orange and Black Stripes", "Black and Purple Stripes", "Black and Orange Stripes",
             "Electric Blue and White Stripes", "Blossom Breeze", "Candy Cane Stripes",
             "Plum Solid", "Patriots (Custom)", "Snow Angel (Custom)", "Cranberry Frost (Custom)",
             "Witchy Vibes", "White and Green Stripes", "Black Solid", "Black and White Stripes"
@@ -986,37 +986,32 @@ if menu == "Bulk Update":
         st.rerun()
 
 # --- Create SKU ---
-if menu == "Create SKU":
-    st.header("➕ Create New SKU")
-    new_sku = st.text_input("Enter SKU Name")
-    hubs = st.multiselect("Assign to Hubs", ["Hub 1", "Hub 2", "Hub 3", "Retail"])
-
-    if st.button("Create SKU"):
-        if not new_sku.strip():
-            st.warning("❗ Please enter a SKU name.")
-        elif not hubs:
-            st.warning("❗ Please assign at least one hub.")
+if st.button("Create SKU"):
+    if not new_sku.strip():
+        st.warning("❗ Please enter a SKU name.")
+    elif not hubs:
+        st.warning("❗ Please assign at least one hub.")
+    else:
+        exists = query("SELECT sku FROM sku_info WHERE sku=?", (new_sku.strip(),))
+        if exists:
+            st.warning("❌ SKU already exists!")
         else:
-            exists = query("SELECT sku FROM sku_info WHERE sku=?", (new_sku.strip(),))
-            if exists:
-                st.warning("❌ SKU already exists!")
-            else:
-                hubs_str = ",".join(hubs)
+            hubs_str = ",".join(hubs)
+            query(
+                "INSERT INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
+                (new_sku.strip(), new_sku.strip(), hubs_str),
+                fetch=False,
+                commit=True
+            )
+            for h in hubs:
                 query(
-                    "INSERT INTO sku_info (sku, product_name, assigned_hubs) VALUES (?, ?, ?)",
-                    (new_sku.strip(), new_sku.strip(), hubs_str),
+                    "INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)",
+                    (new_sku.strip(), h, 0),
                     fetch=False,
                     commit=True
                 )
-                for h in hubs:
-                    query(
-                        "INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)",
-                        (new_sku.strip(), h, 0),
-                        fetch=False,
-                        commit=True
-                    )
-                st.success(f"✅ SKU '{new_sku}' created and assigned!")
-                st.rerun()
+            st.success(f"✅ SKU '{new_sku}' created and assigned!")
+            st.rerun()
 
 
 # --- Assign SKUs ---
@@ -1031,31 +1026,14 @@ if menu == "Assign SKUs" and role == "Admin":
     if st.button("Update Assignments"):
         combined = ",".join(new_hubs)
         query("UPDATE sku_info SET assigned_hubs=? WHERE sku=?", (combined, sku_choice), fetch=False, commit=True)
-        st.success("✅ SKU assignment updated!")
+        # Ensure inventory row exists for every (sku, hub) just assigned
+        for h in new_hubs:
+            query(
+                "INSERT OR IGNORE INTO inventory (sku, hub, quantity) VALUES (?, ?, ?)",
+                (sku_choice, h, 0),
+                fetch=False,
+                commit=True
+            )
+        st.success("✅ SKU assignment updated and inventory rows ensured!")
         st.rerun()
 
-# --- User Access ---
-if menu == "User Access":
-    st.header("🔐 Manage Users")
-    users = query("SELECT username, role, hub FROM users")
-    df_users = pd.DataFrame(users, columns=["Username", "Role", "Hub"])
-    st.dataframe(df_users, use_container_width=True)
-
-    st.subheader("❌ Remove User")
-    # Exclude current logged-in user from removal list
-    users_for_removal = query("SELECT username FROM users WHERE username != ?", (username,))
-    user_list = [u[0] for u in users_for_removal]
-
-    with st.form("remove_user_form"):
-        selected_user = st.selectbox("Select User to Remove", user_list)
-        submitted = st.form_submit_button("Request Removal")
-
-    if submitted:
-        st.session_state['confirm_remove_user'] = selected_user
-
-    if st.session_state.get('confirm_remove_user') == selected_user:
-        if st.button(f"Really remove {selected_user}?"):
-            query("DELETE FROM users WHERE username=?", (selected_user,), fetch=False, commit=True)
-            st.success(f"✅ User '{selected_user}' removed.")
-            st.session_state.pop('confirm_remove_user')
-            st.rerun()
