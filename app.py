@@ -359,6 +359,26 @@ if st.sidebar.button("🚪 Logout", key=f"logout_btn_{username}"):
 
 # --- Define ALL menus and logic exactly as in your latest working code, using unique keys for every Streamlit element. ---
 
+menus = {
+    "Admin": [
+        "Inventory", "Logs", "Shipments", "Messages", "Count", "Assign SKUs",
+        "Create SKU", "Upload SKUs", "User Access", "Create User",
+        "Backup", "Restore", "Google Sheets"
+    ],
+    "Hub Manager": [
+        "Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Incoming Shipments", "Google Sheets"
+    ],
+    "Retail": [
+        "Inventory", "Update Stock", "Bulk Update", "Messages", "Count", "Google Sheets"
+    ],
+    "Supplier": [
+        "Shipments"
+    ]
+}
+
+menu = st.sidebar.radio("Menu", menus[role], key="menu_radio")
+
+
 # --- User Access ---
 if menu == "User Access" and role == "Admin":
     st.header(T("manage_users"))
